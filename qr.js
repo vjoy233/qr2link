@@ -18,6 +18,10 @@
 
   var STAGE1_MAX_SIDE = 2000; // 阶段 1 降采样目标：最长边上限（DESIGN §3.3）
   var FETCH_TIMEOUT_MS = 10000; // 远程取图超时：黑洞网络下 fetch 永不返回，用户将无限等待（DESIGN §5.2）
+  // 阶段 2 全分辨率像素预算（50MP ≈ 8000×6000）：超出则跳过全图重扫，避免 canvas/getImageData
+  // 内存暴涨与失败风险；用户可框选缩小范围后仍走全分辨率（DESIGN §3.3，验收 review #3）。
+  // 50MP 下限保证 8000×5000（40MP）大图小码场景不受影响
+  var STAGE2_MAX_PIXELS = 50000000;
 
   // ---- 原生引擎能力检测（DESIGN §2.1，结果按页面会话缓存）----
   var nativeCheckPromise = null;
@@ -113,6 +117,9 @@
     var scale = Math.min(1, maxSide / Math.max(sw, sh)); // 仅缩不小放大
     var cw = Math.max(1, Math.round(sw * scale));
     var ch = Math.max(1, Math.round(sh * scale));
+    // 浏览器 canvas 单边上限（Chromium 32767）：极端长宽比图（如 40000×500）按本趟无结果处理，
+    // 外层统一走「未识别到 + 框选重试」，而非抛异常（验收 review #3）
+    if (cw > 32767 || ch > 32767) return [];
 
     var canvas = document.createElement('canvas');
     canvas.width = cw;
@@ -174,7 +181,8 @@
       var hits = await decodePass(loaded, rect, STAGE1_MAX_SIDE);
 
       // 阶段 2：无任何结果 → 原图全分辨率重试（覆盖大图小码）
-      if (hits.length === 0) {
+      // 像素预算内才执行：超出 50MP 的全图重扫得不偿失，落到「未识别到 + 框选重试」（验收 review #3）
+      if (hits.length === 0 && rect.w * rect.h <= STAGE2_MAX_PIXELS) {
         hits = await decodePass(loaded, rect, Infinity);
       }
 

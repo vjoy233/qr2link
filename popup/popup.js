@@ -21,6 +21,8 @@
   var state = {
     view: 'home',
     busy: false,        // 解码进行中，屏蔽重复触发
+    capturing: false,   // 截图捕获进行中（双击防重；不可复用 busy——失败须释放，否则入口锁死）
+    reading: false,     // 剪贴板读取进行中（同上）
     imageBlob: null,    // 可供「框选重试」的源图片（失败路径保留，成功路径释放）
     thumb: null,        // 结果缩略图 dataURL（成功后生成小图，随即释放源 Blob）
     lastResults: null,
@@ -221,7 +223,9 @@
   function copyText(text, btn) {
     return navigator.clipboard.writeText(text).then(function () {
       flashBtn(btn, T.copied);
-    }, function () { /* 聚焦异常静默 */ });
+    }, function () {
+      flashBtn(btn, T.copyFailed); // 写入被拒也要有反馈，否则像按钮失效（验收 review #5）
+    });
   }
 
   function flashBtn(btn, msg) {
@@ -337,13 +341,17 @@
 
   // ---------------- 三入口 ----------------
   function onScreenshot() {
-    if (state.busy) return;
+    if (state.busy || state.capturing) return;
+    state.capturing = true;
+    var done = function () { state.capturing = false; };
     chrome.tabs.captureVisibleTab(null, { format: 'png' }).then(function (dataUrl) {
       // dataURL → Blob（fetch 对 data: URL 不发网络请求）
       return fetch(dataUrl).then(function (resp) { return resp.blob(); });
     }).then(function (blob) {
+      done();
       enterPreviewAndCrop(blob); // 截图入口：先进预览框选（DESIGN §4.1）
     }, function () {
+      done();
       showError(T.errCaptureTitle, T.errCaptureHint, false); // 特殊页面等，引导粘贴/上传
     });
   }
@@ -355,7 +363,9 @@
   }
 
   function onReadClipboard() {
-    if (state.busy) return;
+    if (state.busy || state.reading) return;
+    state.reading = true;
+    var done = function () { state.reading = false; };
     navigator.clipboard.read().then(function (items) {
       var found = null;
       for (var i = 0; i < items.length && !found; i++) {
@@ -365,12 +375,19 @@
         }
       }
       if (!found) {
+        done();
         showError(T.errClipboardNoImage, '', false);
         return;
       }
-      found.then(function (blob) { runDecode(blob, undefined); },
-        function () { showError(T.errClipboardRead, T.errClipboardReadHint, false); });
+      found.then(function (blob) {
+        done();
+        runDecode(blob, undefined);
+      }, function () {
+        done();
+        showError(T.errClipboardRead, T.errClipboardReadHint, false);
+      });
     }, function () {
+      done();
       showError(T.errClipboardRead, T.errClipboardReadHint, false);
     });
   }

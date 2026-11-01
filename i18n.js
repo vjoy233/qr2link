@@ -46,6 +46,7 @@
     btnCopy: '复制',
     btnKeep: '保留',
     copied: '已复制',
+    copyFailed: '复制失败',
     kept: '已保留',
     textLabel: '文本',
 
