@@ -64,6 +64,17 @@ function makeAssets() {
     await QRCode.toFile(path.join(OUT_DIR, 'trim.png'), '  https://example.com/qr2link-trim  ', { width: 320, margin: 2 });
     fs.writeFileSync(path.join(OUT_DIR, 'note.txt'), 'not an image\n');
 
+    // 超出阶段 2 像素预算（10000×6000 = 60MP > 50MP）：阶段 1 降采样必 miss，
+    // 阶段 2 应被预算拦下 → 「未识别到 + 框选重试」（验收 review #3 行为锁定）
+    await QRCode.toFile(path.join(OUT_DIR, '.tmp-ob.png'), 'https://example.com/qr2link-huge', { width: 120, margin: 2 });
+    await sharp({
+      create: { width: 10000, height: 6000, channels: 3, background: '#ffffff' },
+    })
+      .composite([{ input: path.join(OUT_DIR, '.tmp-ob.png'), left: 10000 - 120 - 60, top: 6000 - 120 - 60 }])
+      .png()
+      .toFile(path.join(OUT_DIR, 'huge-over-budget.png'));
+    fs.rmSync(path.join(OUT_DIR, '.tmp-ob.png'), { force: true });
+
     // 最小合法 PDF（含 xref，PDFium 可读）
     const objs = [
       '1 0 obj\n<</Type/Catalog/Pages 2 0 R>>\nendobj\n',
@@ -631,6 +642,83 @@ async function suiteB(h, srv) {
     await page.locator('label.switch').click(); // 开
     await sleep(250);
     assert((await page.locator('#history-list .history-item').count()) > 0, '重开后数据仍在');
+  });
+
+  // ---- 验收 review #7：BarcodeDetector 原生路径（本环境无原生引擎，注入 Fake 覆盖四条分支） ----
+  // qr.js 能力检测按页面会话缓存，原生引擎无结果时兜底 jsQR ——
+  // 故每个用例须用全新 popup 页，注入 Fake 后、任何解码发生前完成。
+
+  /** 注入 FakeBarcodeDetector；formats 决定能力检测，detect 决定 detect() 行为 */
+  async function injectFakeDetector(pg, { formats, detect }) {
+    await pg.evaluate(([fmt, detectMode]) => {
+      window.BarcodeDetector = class {
+        static async getSupportedFormats() { return fmt; }
+        constructor(opts) { this.opts = opts; }
+        async detect() {
+          if (detectMode === 'throw') throw new Error('fake detect failure');
+          if (detectMode === 'two') {
+            return [
+              { rawValue: 'https://example.com/qr2link-left' },
+              { rawValue: 'https://example.com/qr2link-right' },
+            ];
+          }
+          return []; // 'empty'
+        }
+      };
+    }, [formats, detect]);
+  }
+
+  await t('B29 原生引擎成功且多码 → 两张结果卡片（原生多码展示路径）', async () => {
+    const p = await newPopup(h);
+    try {
+      await injectFakeDetector(p, { formats: ['qr_code'], detect: 'two' });
+      await p.setInputFiles('#file-input', path.join(TEST_DIR, 'two-codes.png'));
+      await waitResults(p);
+      assertEq(await p.locator('.result-card').count(), 2, '应渲染两张卡片');
+      const texts = await p.locator('.result-card .result-text').allTextContents();
+      assert(texts.includes('https://example.com/qr2link-left') && texts.includes('https://example.com/qr2link-right'),
+        `双码文本应齐全，实际 ${JSON.stringify(texts)}`);
+    } finally { await p.close().catch(() => {}); }
+  });
+
+  await t('B30 原生 detect 抛异常 → 静默降级 jsQR 识别成功', async () => {
+    const p = await newPopup(h);
+    try {
+      await injectFakeDetector(p, { formats: ['qr_code'], detect: 'throw' });
+      await p.setInputFiles('#file-input', path.join(TEST_DIR, 'normal.png'));
+      await waitResults(p);
+      assertEq(await p.locator('.result-card .result-text').first().textContent(), 'https://example.com/qr2link-test', '降级后解码文本');
+    } finally { await p.close().catch(() => {}); }
+  });
+
+  await t('B31 getSupportedFormats 不含 qr_code → canUseNativeQr=false 走 jsQR', async () => {
+    const p = await newPopup(h);
+    try {
+      await injectFakeDetector(p, { formats: ['text'], detect: 'two' });
+      const canUse = await p.evaluate(() => window.QR2Link.canUseNativeQr());
+      assertEq(canUse, false, '不含 qr_code 应判不可用');
+      await p.setInputFiles('#file-input', path.join(TEST_DIR, 'text-code.png'));
+      await waitResults(p);
+      assertEq(await p.locator('.result-card .result-meta').first().textContent(), '文本 · jsqr', 'meta 应标注 jsqr 引擎');
+    } finally { await p.close().catch(() => {}); }
+  });
+
+  await t('B32 原生 detect 返回空 → 兜底 jsQR 识别成功', async () => {
+    const p = await newPopup(h);
+    try {
+      await injectFakeDetector(p, { formats: ['qr_code'], detect: 'empty' });
+      await p.setInputFiles('#file-input', path.join(TEST_DIR, 'normal.png'));
+      await waitResults(p);
+      assertEq(await p.locator('.result-card .result-text').first().textContent(), 'https://example.com/qr2link-test', '兜底解码文本');
+    } finally { await p.close().catch(() => {}); }
+  });
+
+  await t('B33 超 50MP 预算：阶段 2 跳过 → 明确报错 + 框选重试可用（review #3 行为锁定）', async () => {
+    await goHome(page);
+    await page.setInputFiles('#file-input', path.join(OUT_DIR, 'huge-over-budget.png'));
+    await waitErr(page, 30000);
+    assertEq(await statusText(page), '未识别到二维码', '60MP 图应被预算拦下而非全图重扫');
+    assert(await page.locator('#btn-retry-crop').isVisible(), '应提供框选重试');
   });
 
   await cleanup();
