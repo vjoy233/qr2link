@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>QR2Link</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body data-mode="compact">
+
+  <header>
+    <span class="app-name" data-i18n="appName"></span>
+    <span class="app-sub" data-i18n="appSubtitle"></span>
+  </header>
+
+  <main id="main">
+    <!-- 主页：三入口 + 历史 -->
+    <section id="view-home">
+      <div class="entry-grid">
+        <button id="btn-screenshot" class="entry-btn">
+          <span class="entry-icon" aria-hidden="true">📷</span>
+          <span class="entry-label" data-i18n="btnScreenshot"></span>
+          <span class="entry-sub" data-i18n="btnScreenshotSub"></span>
+        </button>
+        <button id="btn-upload" class="entry-btn">
+          <span class="entry-icon" aria-hidden="true">📁</span>
+          <span class="entry-label" data-i18n="btnUpload"></span>
+          <span class="entry-sub" data-i18n="btnUploadSub"></span>
+        </button>
+      </div>
+      <div class="clipboard-row">
+        <button id="btn-clipboard" class="wide-btn" data-i18n="btnClipboard"></button>
+      </div>
+      <p class="hint" data-i18n="inputHint"></p>
+
+      <div id="history-panel">
+        <div class="history-head">
+          <span class="history-title" data-i18n="historyTitle"></span>
+          <label class="switch" for="history-toggle">
+            <input type="checkbox" id="history-toggle">
+            <span class="slider" aria-hidden="true"></span>
+          </label>
+          <button id="history-clear" class="link-btn danger" data-i18n="historyClear" hidden></button>
+        </div>
+        <div id="history-list"></div>
+      </div>
+    </section>
+
+    <!-- 预览 + 框选（crop.js 渲染于 #crop-root） -->
+    <section id="view-preview" hidden>
+      <div class="view-bar">
+        <button id="btn-back-preview" class="link-btn" data-i18n="btnBack"></button>
+      </div>
+      <div id="crop-root"></div>
+    </section>
+
+    <!-- 识别中 / 错误提示 -->
+    <section id="view-status" hidden>
+      <div id="status-body">
+        <div id="status-spinner" class="spinner" aria-hidden="true"></div>
+        <div id="status-title"></div>
+        <div id="status-hint" class="hint"></div>
+        <button id="btn-retry-crop" class="wide-btn" hidden data-i18n="btnRetryCrop"></button>
+      </div>
+    </section>
+
+    <!-- 结果列表 -->
+    <section id="view-results" hidden>
+      <div class="view-bar">
+        <button id="btn-back-results" class="link-btn" data-i18n="btnBack"></button>
+      </div>
+      <div id="result-list"></div>
+    </section>
+  </main>
+
+  <!-- 拖拽覆盖层 -->
+  <div id="drop-overlay" hidden><span data-i18n="dropHere"></span></div>
+  <input type="file" id="file-input" accept="image/*" hidden>
+
+  <script src="../lib/jsQR.js"></script>
+  <script src="../i18n.js"></script>
+  <script src="../qr.js"></script>
+  <script src="crop.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
