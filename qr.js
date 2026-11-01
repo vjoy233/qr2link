@@ -17,6 +17,7 @@
   'use strict';
 
   var STAGE1_MAX_SIDE = 2000; // 阶段 1 降采样目标：最长边上限（DESIGN §3.3）
+  var FETCH_TIMEOUT_MS = 10000; // 远程取图超时：黑洞网络下 fetch 永不返回，用户将无限等待（DESIGN §5.2）
 
   // ---- 原生引擎能力检测（DESIGN §2.1，结果按页面会话缓存）----
   var nativeCheckPromise = null;
@@ -56,9 +57,19 @@
   async function sourceToBlob(source) {
     if (source instanceof Blob) return source;
     if (typeof source === 'string' && source) {
-      const resp = await fetch(source); // dataURL 与 http(s) URL 均可（DESIGN §6.1）
-      if (!resp.ok) throw new Error('IMAGE_FETCH_FAILED');
-      return resp.blob();
+      // dataURL 不走网络；http(s) URL（右键链路）带 10s 超时（DESIGN §5.2）：
+      // 超时/网络失败统一按「取图失败」降级，popup 沿用 errFetchImage 文案，SW 端 badge ✕
+      const ctrl = new AbortController();
+      const timer = setTimeout(function () { ctrl.abort(); }, FETCH_TIMEOUT_MS);
+      try {
+        const resp = await fetch(source, { signal: ctrl.signal });
+        if (!resp.ok) throw new Error('IMAGE_FETCH_FAILED');
+        return await resp.blob();
+      } catch (e) {
+        throw new Error('IMAGE_FETCH_FAILED');
+      } finally {
+        clearTimeout(timer);
+      }
     }
     throw new Error('UNSUPPORTED_SOURCE');
   }

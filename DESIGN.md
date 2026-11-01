@@ -11,6 +11,7 @@
 | v1.0 | 初版设计 |
 | v1.1 | 合入外部 review：补齐 Manifest 权限（offscreen/storage/commands/clipboardWrite）、BarcodeDetector 改运行时能力检测、多码承诺降调、两阶段解码替代固定降采样、隐私声明修正、历史默认关闭、截图新增框选裁剪、测试矩阵扩充 |
 | v1.2 | grill 自审拷问合入：目标浏览器 Chrome+Edge（Firefox 排除）、按可上架标准准备、手动复制、popup 动态加宽、命名 QR2Link、UI 仅中文文案收口；补充 4 条工程默认值与 Edge 实测矩阵 |
+| v1.3 | 首轮自动化验收（TEST-RESULTS.md）后修订：右键链路远程取图增加 10s 超时（黑洞网络下 fetch 永不返回导致用户无限等待，验收发现，用户确认修复） |
 
 **产品要素（已定）**
 
@@ -283,6 +284,7 @@ function parseHttpUrl(raw) {
 右键任意图片 →「识别图中二维码」→ offscreen 内 `fetch(srcUrl)` 取图 → 解码 → 打开链接 / badge 反馈。
 
 - activeTab 临时权限覆盖**当前页面源**：同源图片可取；**跨域 CDN 图片大概率失败**（不申请 `<all_urls>` 的有意取舍）
+- **远程取图 10s 超时**（AbortController）：超时 / 网络失败 / 非 2xx 统一按「取图失败」降级，避免黑洞网络下用户无限等待（v1.3，验收后补）
 - 失败时 badge `✕` + 提示改用「截图 / 下载后上传」
 - 隐私注意：`fetch(srcUrl)` 会向图片原始地址发起请求（见 §1.1）
 
