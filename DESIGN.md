@@ -12,6 +12,7 @@
 | v1.1 | 合入外部 review：补齐 Manifest 权限（offscreen/storage/commands/clipboardWrite）、BarcodeDetector 改运行时能力检测、多码承诺降调、两阶段解码替代固定降采样、隐私声明修正、历史默认关闭、截图新增框选裁剪、测试矩阵扩充 |
 | v1.2 | grill 自审拷问合入：目标浏览器 Chrome+Edge（Firefox 排除）、按可上架标准准备、手动复制、popup 动态加宽、命名 QR2Link、UI 仅中文文案收口；补充 4 条工程默认值与 Edge 实测矩阵 |
 | v1.3 | 首轮自动化验收（TEST-RESULTS.md）后修订：右键链路远程取图增加 10s 超时（黑洞网络下 fetch 永不返回导致用户无限等待，验收发现，用户确认修复） |
+| v1.4 | 外部代码 review 采纳合入（用户确认）：① offscreen 创建锁失败释放；② offscreen 消息链 15s 超时（>10s 取图超时防误杀）；③ 阶段 2 全图重扫增加 50MP 像素预算与 canvas 单边防护；④ 截图/剪贴板入口捕获期互斥；⑤ 复制失败按钮反馈；⑥ badge 清除定时器去重。另补 jsQR Apache-2.0 许可证文本（THIRD_PARTY_LICENSES/）。不采纳项：DOM_SCRAPING reason 变更、badge 背景色还原（理由见 review 回应） |
 
 **产品要素（已定）**
 

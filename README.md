@@ -65,7 +65,7 @@
 - 识别非 URL 内容（WiFi 密码、名片等）只展示原文与复制，不会拼接搜索或改写
 - `javascript:` / `data:` 等非 http/https 协议内容不会被打开
 - 大图中含小二维码时自动进行全分辨率重试；仍失败可框选二维码区域后重试
-- **一图多码**需要运行环境支持原生 BarcodeDetector（Windows 桌面版 Chrome / Edge 通常不支持，此时以 jsQR 解码）；实测 jsQR 对多码同图可能整体不识别，框选其中单个码即可正常识别
+- **一图多码**：Windows 桌面环境（无原生 BarcodeDetector，以 jsQR 解码）以单码识别为主，实测对多码同图可能整体不识别——请**框选其中单个码**识别；原生 BarcodeDetector 可用的环境（如部分移动端）可一次展示多个结果
 
 ## 开发
 
@@ -112,4 +112,4 @@ NODE_PATH="$(npm root -g)" node run-all.cjs chromium # 交叉验证
 
 ## 许可证
 
-本项目代码采用 [MIT License](LICENSE)。`lib/jsQR.js` 为 [cozmo/jsQR](https://github.com/cozmo/jsQR) 官方构建产物（Apache-2.0），其许可声明保留在文件内。
+本项目代码采用 [MIT License](LICENSE)。`lib/jsQR.js` 为 [cozmo/jsQR](https://github.com/cozmo/jsQR) 官方构建产物（Apache-2.0），许可证全文见 [THIRD_PARTY_LICENSES/jsQR-Apache-2.0.txt](THIRD_PARTY_LICENSES/jsQR-Apache-2.0.txt)。

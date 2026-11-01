@@ -24,5 +24,6 @@ SOFTWARE.
 
 Note: lib/jsQR.js is the official distribution of cozmo/jsQR
 (https://github.com/cozmo/jsQR), licensed under the Apache License, Version 2.0.
-Its license notice is retained within that file. It is not covered by the MIT
-license above.
+Its full license text is provided in THIRD_PARTY_LICENSES/jsQR-Apache-2.0.txt
+(the vendored distribution file itself carries no embedded license notice).
+It is not covered by the MIT license above.
