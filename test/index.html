@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>QR2Link 测试页</title>
+  <style>
+    body { font: 14px/1.6 "Segoe UI", "Microsoft YaHei", sans-serif; max-width: 920px; margin: 24px auto; padding: 0 16px; color: #202124; }
+    h1 { font-size: 20px; } h2 { font-size: 16px; margin-top: 28px; }
+    figure { margin: 12px 0; display: inline-block; vertical-align: top; margin-right: 24px; }
+    img { border: 1px solid #ccc; display: block; }
+    figcaption { font-size: 12px; color: #5f6368; margin-top: 4px; max-width: 300px; }
+    code { background: #f1f3f4; padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>QR2Link 本地测试页</h1>
+  <p>
+    所有二维码均由 <code>test/gen-qr.mjs</code> 本地生成，无网络依赖。
+    直接用浏览器打开本文件即可测试「截图识别 / 上传 / 粘贴」三入口。
+  </p>
+
+  <h2>常规样例</h2>
+  <figure>
+    <img src="normal.png" alt="普通二维码" width="240">
+    <figcaption>normal.png — URL 码：<code>https://example.com/qr2link-test</code></figcaption>
+  </figure>
+  <figure>
+    <img src="small.png" alt="小尺寸二维码" width="120">
+    <figcaption>small.png — 120px 小码（贴近识别下限）</figcaption>
+  </figure>
+  <figure>
+    <img src="inverted.png" alt="反色二维码" width="240">
+    <figcaption>inverted.png — 反色码（白码黑底，验证 <code>attemptBoth</code>）</figcaption>
+  </figure>
+  <figure>
+    <img src="text-code.png" alt="文本二维码" width="240">
+    <figcaption>text-code.png — 非 URL 文本（WiFi 信息，应仅展示 + 复制，无「打开」）</figcaption>
+  </figure>
+
+  <h2>边界样例</h2>
+  <figure>
+    <img src="two-codes.png" alt="双二维码" width="320">
+    <figcaption>two-codes.png — 一图两码：原生 BarcodeDetector 环境应展示两张卡片；仅 jsQR 时<em>实测整体不识别</em>（定位点跨码误配，须框选单个码，属 §2.1 后续能力范围）</figcaption>
+  </figure>
+  <figure>
+    <img src="huge-with-small.png" alt="大图小码" width="320">
+    <figcaption>huge-with-small.png — 8000×5000 白底 + 右下角 120px 小码（验证两阶段解码；请用「上传」入口测全分辨率，截图只能取到缩放后的显示尺寸）</figcaption>
+  </figure>
+  <figure>
+    <img src="no-qr.png" alt="无二维码风景图" width="320">
+    <figcaption>no-qr.png — 无码图（应明确提示「未识别到二维码」）</figcaption>
+  </figure>
+
+  <h2>右键识别 · 跨域降级测试（实验性）</h2>
+  <figure>
+    <img src="https://www.baidu.com/img/PCtm_d9c8750bed0b3c7d089fa7d55720d6cf.png" alt="跨域图片" width="200">
+    <figcaption>跨域远程图片：右键「识别图中二维码」预期走降级路径（fetch 受跨域限制 → 图标 badge ✕）。同源图片请右键上方本地样例图测试。</figcaption>
+  </figure>
+
+  <h2>测试要点速查</h2>
+  <ul>
+    <li>快捷键 Alt+Shift+S：在本页按一次 → 应自动打开第一个识别到的链接</li>
+    <li>粘贴通道：Win+Shift+S 截取本页任意码 → 弹窗内 Ctrl+V / 点「读取剪贴板图片」</li>
+    <li>框选：截图后在预览图拖拽小框套住码 → 「识别所选区域」</li>
+  </ul>
+</body>
+</html>
