@@ -4,3 +4,4 @@ package-lock.json
 *.crx
 *.pem
 test/out/
+test/e2e/report/
