@@ -4,7 +4,7 @@
  * 挂载全局命名空间 window.QR2Link：
  *   canUseNativeQr()                      运行时检测原生 BarcodeDetector 是否支持 qr_code
  *   parseHttpUrl(raw)                     仅接受 http/https 链接，其余返回 null（DESIGN §4.4）
- *   decodeImage(source, opts)             两阶段双引擎解码（DESIGN §3.3）
+ *   decodeImage(source, opts)             三阶段双引擎解码（DESIGN §3.3，阶段 3 为 issue #1 多码分块）
  *
  * source: Blob | dataURL 字符串 | http(s) URL 字符串
  *   注意：URL 字符串的 fetch 在「调用方所在文档」执行——右键识别链路必须由 offscreen 调用。
@@ -22,6 +22,15 @@
   // 内存暴涨与失败风险；用户可框选缩小范围后仍走全分辨率（DESIGN §3.3，验收 review #3）。
   // 50MP 下限保证 8000×5000（40MP）大图小码场景不受影响
   var STAGE2_MAX_PIXELS = 50000000;
+  // 阶段 3 象限分块分辨率档位：rect ≤ 9MP（4K 截图 ≈ 8.3MP）逐块全分辨率扫；
+  // 更大图（≤50MP，超出不进入阶段 3）按阶段 1 档位（最长边 ≤2000px）分块——定位点跨码
+  // 误配与分辨率无关，逐块降采样仍可救较大的码；全梯子最坏全 miss 耗时有界
+  // （实测 5.6MP ≈ 2.2s / 9MP ≈ 4s），不给 offscreen 消息链 15s 超时添险（issue #1）
+  var STAGE3_MAX_RECT_PIXELS = 9000000;
+  // 阶段 3 分块几何梯子：单轴切分（1×2 / 2×1）救「近满幅并排/堆叠双码」——这类码会被
+  // 2×2 的中线拦腰切断（实测 two-codes.png 2×2 全 miss）；2×2 救四角均布，4×4 救更密均布。
+  // 每趟网格全跑、命中合并（后趟可救前趟被切坏或与邻码共存的码），由 decodeImage 统一去重
+  var STAGE3_GRIDS = [[1, 2], [2, 1], [2, 2], [4, 4]];
 
   // ---- 原生引擎能力检测（DESIGN §2.1，结果按页面会话缓存）----
   var nativeCheckPromise = null;
@@ -155,7 +164,40 @@
     return hits;
   }
 
-  // ---- 两阶段主流程（DESIGN §3.3）----
+  // ---- 阶段 3：象限分块重扫（issue #1 多码图）----
+  // 背景：jsQR 单码引擎对多码图定位点跨码误配，表现为「整体 miss」而非少识别一个
+  // （TEST-RESULTS §5.2 / issue #1）；分块后单块内通常至多一码即可命中。
+  // 将 rect 按网格均分为 cols×rows 块（相邻块共享边界，坐标取整对齐）
+  function gridTiles(rect, cols, rows) {
+    var tiles = [];
+    for (var j = 0; j < rows; j++) {
+      for (var i = 0; i < cols; i++) {
+        var x0 = rect.x + Math.round(i * rect.w / cols);
+        var x1 = rect.x + Math.round((i + 1) * rect.w / cols);
+        var y0 = rect.y + Math.round(j * rect.h / rows);
+        var y1 = rect.y + Math.round((j + 1) * rect.h / rows);
+        tiles.push({ x: x0, y: y0, w: x1 - x0, h: y1 - y0 });
+      }
+    }
+    return tiles;
+  }
+
+  // 全梯子扫完合并（不按趟早停：后趟网格能救前趟被切坏或与邻码同块共存的码）；
+  // 极端布局（如 3 列均布网格、密集骑缝码）仍可能 miss → 落回「未识别到 + 框选重试」
+  async function decodeTiled(loaded, rect) {
+    var perTileMaxSide = rect.w * rect.h <= STAGE3_MAX_RECT_PIXELS ? Infinity : STAGE1_MAX_SIDE;
+    var hits = [];
+    for (var g = 0; g < STAGE3_GRIDS.length; g++) {
+      var tiles = gridTiles(rect, STAGE3_GRIDS[g][0], STAGE3_GRIDS[g][1]);
+      for (var i = 0; i < tiles.length; i++) {
+        var tileHits = await decodePass(loaded, tiles[i], perTileMaxSide);
+        for (var k = 0; k < tileHits.length; k++) hits.push(tileHits[k]);
+      }
+    }
+    return hits;
+  }
+
+  // ---- 三阶段主流程（DESIGN §3.3）----
   async function decodeImage(source, opts) {
     opts = opts || {};
     var loaded = null;
@@ -184,6 +226,17 @@
       // 像素预算内才执行：超出 50MP 的全图重扫得不偿失，落到「未识别到 + 框选重试」（验收 review #3）
       if (hits.length === 0 && rect.w * rect.h <= STAGE2_MAX_PIXELS) {
         hits = await decodePass(loaded, rect, Infinity);
+
+        // 阶段 3：仍无结果 → 象限分块重扫（issue #1 多码图）：1×2/2×1/2×2/4×4 逐块跑引擎序列，
+        // 救「多码分布均匀」场景（jsQR 整体 miss）；仅阶段 2 实际执行过才进入——
+        // 超 50MP 大图维持「框选重试」契约不变（验收 review #3 行为锁定，B33）。
+        // 已知边界：jsQR 在全图上已解出 ≥1 码时不分块（无法廉价区分「仅此一码」与
+        // 「多码漏网其一」），该情形下漏掉的码仍走「框选重试」（issue 范围即整体 miss）。
+        // 注意逐块降采样（≤2000px）远比整图降采样温和（如 5000→2000 仅 2.5×），
+        // 故超 9MP 大图分块仍可能救出阶段 1 扫不出的较大码
+        if (hits.length === 0) {
+          hits = await decodeTiled(loaded, rect);
+        }
       }
 
       // 去重 + trim + 链接分类

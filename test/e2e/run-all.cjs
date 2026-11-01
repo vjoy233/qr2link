@@ -75,6 +75,36 @@ function makeAssets() {
       .toFile(path.join(OUT_DIR, 'huge-over-budget.png'));
     fs.rmSync(path.join(OUT_DIR, '.tmp-ob.png'), { force: true });
 
+    // 四角四码（800×800，issue #1：阶段 3 的 2×2 梯级 + 多卡片渲染）
+    const cornerBufs = [];
+    for (let i = 0; i < 4; i++) {
+      cornerBufs.push(await QRCode.toBuffer(`https://example.com/qr2link-c${i}`, { width: 300, margin: 2 }));
+    }
+    await sharp({
+      create: { width: 800, height: 800, channels: 3, background: '#ffffff' },
+    })
+      .composite([
+        { input: cornerBufs[0], left: 40, top: 40 }, { input: cornerBufs[1], left: 460, top: 40 },
+        { input: cornerBufs[2], left: 40, top: 460 }, { input: cornerBufs[3], left: 460, top: 460 },
+      ])
+      .png()
+      .toFile(path.join(OUT_DIR, 'four-corners.png'));
+
+    // 40MP 同文双码（8000×5000，issue #1 边界锁定：>9MP 分块档位 / 阶段 2 子集行为，
+    // 两路收敛同一文本 → 恰 1 张卡片）
+    await QRCode.toFile(path.join(OUT_DIR, '.tmp-twin.png'), 'https://example.com/qr2link-twin', { width: 300, margin: 2 });
+    const twinBuf = await sharp(path.join(OUT_DIR, '.tmp-twin.png')).toBuffer();
+    await sharp({
+      create: { width: 8000, height: 5000, channels: 3, background: '#ffffff' },
+    })
+      .composite([
+        { input: twinBuf, left: 500, top: 500 },
+        { input: twinBuf, left: 6500, top: 4000 },
+      ])
+      .png({ compressionLevel: 9 })
+      .toFile(path.join(OUT_DIR, 'big-two.png'));
+    fs.rmSync(path.join(OUT_DIR, '.tmp-twin.png'), { force: true });
+
     // 最小合法 PDF（含 xref，PDFium 可读）
     const objs = [
       '1 0 obj\n<</Type/Catalog/Pages 2 0 R>>\nendobj\n',
@@ -296,6 +326,14 @@ async function suiteA(h, srv) {
     assertEq(out.spaceUrl, 'https://example.com/qr2link-trim', '带空格 URL 应 trim');
     assertEq(out.plain, null, '纯文本非 URL');
   });
+
+  await t('A14 offscreen 多码：双码图 dataURL → 2 条结果（issue #1）', async () => {
+    const out = await h.sw.evaluate(async (src) => decodeInOffscreen({ kind: 'dataURL', value: src }), fileDataUrl(path.join(TEST_DIR, 'two-codes.png')));
+    assertEq(out.length, 2, '结果数（阶段 3 分块救回双码）');
+    const texts = out.map((r) => r.text).sort();
+    assertEq(texts[0], 'https://example.com/qr2link-left', '左码文本');
+    assertEq(texts[1], 'https://example.com/qr2link-right', '右码文本');
+  });
 }
 
 // ================= Suite B：popup UI（标签页模式） =================
@@ -406,15 +444,20 @@ async function suiteB(h, srv) {
     assert(btns.includes('打开'), 'trim 后应识别为 URL');
   });
 
-  await t('B11 双码图上传：jsQR 整体 miss → 明确报错 + 「框选重试」出现（handoff §3 行为复现）', async () => {
+  await t('B11 双码图上传 → 阶段 3 分块救回：两张结果卡片（issue #1 主场景）', async () => {
     await goHome(page);
     await page.setInputFiles('#file-input', path.join(TEST_DIR, 'two-codes.png'));
-    await waitErr(page);
-    assertEq(await statusText(page), '未识别到二维码', '错误标题（jsQR 对双码图整体不识别，符合已知边界）');
-    assert(await page.locator('#btn-retry-crop').isVisible(), '框选重试按钮可见');
+    await waitResults(page);
+    assertEq(await page.locator('.result-card').count(), 2, '应渲染两张卡片');
+    const texts = await page.locator('.result-card .result-text').allTextContents();
+    assert(texts.includes('https://example.com/qr2link-left') && texts.includes('https://example.com/qr2link-right'),
+      `双码文本应齐全，实际 ${JSON.stringify(texts)}`);
   });
 
-  await t('B12 框选重试：拖拽选区 →「识别所选区域」→ rect 换算正确（双码图取左码）', async () => {
+  await t('B12 框选重试：超预算大图圈定右下角小码 → rect 换算正确并解码（crop 缩小范围后绕过 50MP 预算）', async () => {
+    await goHome(page);
+    await page.setInputFiles('#file-input', path.join(OUT_DIR, 'huge-over-budget.png'));
+    await waitErr(page, 30000);
     await page.locator('#btn-retry-crop').click();
     await page.locator('#view-preview').waitFor({ state: 'visible' });
     assertEq(await bodyMode(page), 'wide', '预览态应展开');
@@ -426,9 +469,9 @@ async function suiteB(h, srv) {
     }, undefined, { timeout: 8000 });
     const box = await overlay.boundingBox();
     assert(box, 'overlay 应有几何尺寸');
-    // 双码图 640×340：左码位于 x 10..310。框选左半区域
-    const x0 = box.x + box.width * 0.02, y0 = box.y + box.height * 0.06;
-    const x1 = box.x + box.width * 0.48, y1 = box.y + box.height * 0.94;
+    // 10000×6000：码位于右下角 (9820..9940, 5820..5940)。框选右下区域
+    const x0 = box.x + box.width * 0.955, y0 = box.y + box.height * 0.95;
+    const x1 = box.x + box.width * 0.999, y1 = box.y + box.height * 0.999;
     await page.mouse.move(x0, y0);
     await page.mouse.down();
     await page.mouse.move(x1, y1, { steps: 10 });
@@ -440,7 +483,7 @@ async function suiteB(h, srv) {
     assert(await btnCrop.isEnabled(), '识别所选区域应可用');
     await btnCrop.click();
     await waitResults(page);
-    assertEq(await page.locator('.result-card .result-text').first().textContent(), 'https://example.com/qr2link-left', '框选左码应得 left 结果（blob 为 B11 的双码图）');
+    assertEq(await page.locator('.result-card .result-text').first().textContent(), 'https://example.com/qr2link-huge', '框选右下角应解码出小码（rect 换算正确）');
   });
 
   await t('B13 预览态：误点（<8px）清除选区，「识别所选区域」禁用', async () => {
@@ -719,6 +762,26 @@ async function suiteB(h, srv) {
     await waitErr(page, 30000);
     assertEq(await statusText(page), '未识别到二维码', '60MP 图应被预算拦下而非全图重扫');
     assert(await page.locator('#btn-retry-crop').isVisible(), '应提供框选重试');
+  });
+
+  await t('B34 四角四码上传 → 阶段 3 的 2×2 梯级：四张结果卡片（issue #1）', async () => {
+    await goHome(page);
+    await page.setInputFiles('#file-input', path.join(OUT_DIR, 'four-corners.png'));
+    await waitResults(page);
+    assertEq(await page.locator('.result-card').count(), 4, '应渲染四张卡片');
+    const texts = await page.locator('.result-card .result-text').allTextContents();
+    for (let i = 0; i < 4; i++) {
+      assert(texts.includes(`https://example.com/qr2link-c${i}`), `缺 c${i} 结果，实际 ${JSON.stringify(texts)}`);
+    }
+  });
+
+  await t('B35 40MP 同文双码 → 恰 1 张卡片（阶段 2 命中其一或 >9MP 分块档兜底，两路收敛同一文本；issue #1 边界锁定）', async () => {
+    await goHome(page);
+    await page.setInputFiles('#file-input', path.join(OUT_DIR, 'big-two.png'));
+    await waitResults(page, 60000);
+    const texts = await page.locator('.result-card .result-text').allTextContents();
+    assertEq(texts.length, 1, '同文双码去重后应 1 张卡片');
+    assertEq(texts[0], 'https://example.com/qr2link-twin', '文本');
   });
 
   await cleanup();
