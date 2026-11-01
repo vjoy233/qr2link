@@ -23,11 +23,14 @@
 
 ## 安装（开发者模式加载）
 
-1. 下载 / 克隆本仓库到本地
-2. 打开 `chrome://extensions`（Edge 为 `edge://extensions`）
-3. 打开右上角「开发者模式」
-4. 点「加载已解压的扩展程序」，选择本仓库根目录（含 `manifest.json` 的目录）
-5. 工具栏出现 QR2Link 图标即可使用
+**方式一：下载 Release 包（推荐普通用户）** —— 到 [Releases](https://github.com/vjoy233/qr2link/releases) 下载 `qr2link-v*.zip` 解压，然后按下面第 2–5 步选择解压出的文件夹。
+
+**方式二：克隆仓库（开发者）** —— 下载 / 克隆本仓库到本地，同法加载仓库根目录。
+
+1. 打开 `chrome://extensions`（Edge 为 `edge://extensions`）
+2. 打开右上角「开发者模式」
+3. 点「加载已解压的扩展程序」，选择含 `manifest.json` 的目录
+4. 工具栏出现 QR2Link 图标即可使用
 
 修改代码后，在扩展管理页点「重新加载」生效。
 

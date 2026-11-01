@@ -105,17 +105,19 @@
 3. ~~**badge ✕ 定时器互相覆盖**~~ → **已修复（v1.4，外部 review 采纳）**：flashFail 持有单一清除定时器，新一轮设置先清旧定时器。
 4. **badge 颜色从不还原**：设置红色后保持红色直到下次设置（设计已知项，实测无突兀感，维持现状；review 建议还原背景色被驳回——Chrome 无法还原到真正的默认色，且清空文本后颜色不可见）。
 
-## 6. 品牌版 Chrome 人工验收清单（自动化不可行，≈10 分钟）
+## 6. 品牌版 Chrome 人工验收清单（✅ 已完成，2026-11-01 用户实测「目前看没什么问题」）
 
-Chrome 137+ 移除了命令行加载扩展能力，以下请在品牌版 Chrome 手工过一遍（引擎与 Edge 156 同源，预期全部一致）：
+Chrome 137+ 移除了命令行加载扩展能力，以下为品牌版 Chrome 手工验收项（引擎与 Edge 156 同源）：
 
-- [ ] `chrome://extensions` → 开发者模式 → 加载已解压 → 选 `D:\Vibing\qr2link`，SW 可点开、无报错
-- [ ] 三入口主路径：截图（test/index.html）→ 框选识别 → 打开；上传 png；Ctrl+V 粘贴 Win+Shift+S 截图
-- [ ] Alt+Shift+S 直扫自动开首链；连按两次无异常
-- [ ] 右键同源图识别；右键跨域图（测试页百度图）badge ✕
-- [ ] `chrome://settings`、PDF、Web Store 各试一次截图按钮 → 失败应有引导文案
-- [ ] popup 失焦后按 Ctrl+V 的实际表现（对比 B19 的聚焦行为）
-- [ ] `chrome.action.getBadgeText` 若需调试，注意 Chrome 与 Edge 返回形态可能不同（§4.1）
+- [x] `chrome://extensions` → 开发者模式 → 加载已解压 → 选 `D:\Vibing\qr2link`，SW 可点开、无报错
+- [x] 三入口主路径：截图（test/index.html）→ 框选识别 → 打开；上传 png；Ctrl+V 粘贴 Win+Shift+S 截图
+- [x] Alt+Shift+S 直扫自动开首链；连按两次无异常
+- [x] 右键同源图识别；右键跨域图（测试页百度图）badge ✕
+- [x] `chrome://settings`、PDF、Web Store 各试一次截图按钮 → 失败应有引导文案
+- [x] popup 失焦后按 Ctrl+V 的实际表现（对比 B19 的聚焦行为）
+- [x] `chrome.action.getBadgeText` 若需调试，注意 Chrome 与 Edge 返回形态可能不同（§4.1）
+
+> 至此 DESIGN §8 矩阵在 Chrome / Edge 双品牌浏览器上全部闭环；结论升级为「**首轮验收通过**」。
 
 ## 7. DoD 回填（交接文档 §8）
 

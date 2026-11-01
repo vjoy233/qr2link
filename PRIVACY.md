@@ -41,7 +41,8 @@ QR2Link（下称「本扩展」）的设计原则是：**识别内容只在您�
 
 ## 联系方式
 
-- 邮箱：`your-email@example.com`（占位，上架前替换为有效联系方式）
+- 邮箱：`VJoyqys@users.noreply.github.com`（GitHub no-reply 地址，不作为常用收件箱）
+- 推荐：通过 GitHub Issues 联系 —— https://github.com/vjoy233/qr2link/issues
 
 ## 变更
 
