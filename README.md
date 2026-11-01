@@ -92,6 +92,20 @@ node scripts/gen-icons.mjs# 重新生成图标 PNG
 
 调试入口：弹窗内右键 → 检查；扩展管理页「service worker」；`chrome://extensions` → 检查视图 offscreen.html。
 
+### 自动化验收（test/e2e）
+
+Playwright 驱动真实浏览器加载未打包扩展跑 54 条验收用例（DESIGN §8 的可自动化子集）：
+
+```bash
+cd test/e2e
+NODE_PATH="$(npm root -g)" node run-all.cjs msedge   # 主环境 Edge（需本机装有 Playwright 全局包）
+NODE_PATH="$(npm root -g)" node run-all.cjs chromium # 交叉验证
+```
+
+- 品牌版 Chrome 137+ 已移除 `--load-extension`，自动化请在 Edge / Playwright Chromium 跑；Chrome 手工项见 `TEST-RESULTS.md` §6
+- 套件涉及真实 OS 键盘注入（Alt+Shift+S）与系统剪贴板读写，会短暂抢占前台窗口
+- 报告输出至 `test/e2e/report/`；首轮验收实测结论见 [TEST-RESULTS.md](TEST-RESULTS.md)
+
 ## 设计文档
 
 架构与全部决策记录见 [DESIGN.md](DESIGN.md)。
