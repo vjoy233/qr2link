@@ -17,7 +17,7 @@ const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'u
 const version = manifest.version;
 
 const INCLUDE = [
-  'manifest.json', 'background.js', 'offscreen.html', 'offscreen.js',
+  'manifest.json', '_locales', 'background.js', 'offscreen.html', 'offscreen.js',
   'qr.js', 'i18n.js', 'popup', 'lib', 'icons',
 ];
 const distDir = path.join(root, 'dist');

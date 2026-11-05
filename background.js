@@ -26,7 +26,7 @@ async function ensureOffscreen() {
   const pending = chrome.offscreen.createDocument({
     url: 'offscreen.html',
     reasons: [chrome.offscreen.Reason.DOM_SCRAPING],
-    justification: 'Service Worker 无 DOM/canvas，需要隐藏文档本地解码二维码图片',
+    justification: 'Decode QR images locally in a hidden document; the service worker has no DOM/canvas.',
   });
   creating = pending;
   try {
@@ -110,8 +110,8 @@ chrome.commands.onCommand.addListener(function (command) {
 });
 
 // ---- 右键图片识别（DESIGN §5.2，跨域图片属实验性） ----
-chrome.runtime.onInstalled.addListener(function () {
-  // 安装/更新都会触发：先清后建，避免重复 id 报错
+function createMenu() {
+  // 先清后建，避免重复 id 报错；标题按当前命中语言包解析（i18n 双语）
   chrome.contextMenus.removeAll(function () {
     chrome.contextMenus.create({
       id: MENU_ID,
@@ -119,7 +119,12 @@ chrome.runtime.onInstalled.addListener(function () {
       contexts: ['image'],
     });
   });
-});
+}
+
+// onInstalled 覆盖安装/更新；onStartup 覆盖「用户改浏览器语言后重启」——
+// 此时 onInstalled 不触发，菜单标题须按新语言重建（I18N-PLAN §4.5）
+chrome.runtime.onInstalled.addListener(createMenu);
+chrome.runtime.onStartup.addListener(createMenu);
 
 chrome.contextMenus.onClicked.addListener(function (info) {
   if (info.menuItemId !== MENU_ID || !info.srcUrl) return;

@@ -1,10 +1,11 @@
 {
   "name": "qr2link-dev",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "QR2Link 开发辅助脚本（二维码测试图生成）。扩展本体无构建步骤，不依赖 npm。",
   "scripts": {
-    "gen-qr": "node test/gen-qr.mjs"
+    "gen-qr": "node test/gen-qr.mjs",
+    "check:locales": "node scripts/check-locales.mjs"
   },
   "devDependencies": {
     "jsqr": "1.4.0",

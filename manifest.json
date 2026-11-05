@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
   "name": "QR2Link",
-  "version": "1.0.0",
-  "description": "截图 / 上传 / 粘贴图片，本地识别二维码并打开网页链接",
+  "version": "1.1.0",
+  "default_locale": "en",
+  "description": "__MSG_manifest_description__",
   "minimum_chrome_version": "116",
   "action": { "default_popup": "popup/popup.html", "default_title": "QR2Link" },
   "background": { "service_worker": "background.js" },
@@ -18,7 +19,7 @@
   "commands": {
     "scan-current-page": {
       "suggested_key": { "default": "Alt+Shift+S" },
-      "description": "截图并识别当前网页中的二维码"
+      "description": "__MSG_command_scan_description__"
     }
   }
 }
