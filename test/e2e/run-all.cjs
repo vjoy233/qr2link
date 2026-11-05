@@ -75,6 +75,75 @@ function makeAssets() {
       .toFile(path.join(OUT_DIR, 'huge-over-budget.png'));
     fs.rmSync(path.join(OUT_DIR, '.tmp-ob.png'), { force: true });
 
+    // 四角四码（800×800，issue #1：阶段 3 的 2×2 梯级 + 多卡片渲染）
+    const cornerBufs = [];
+    for (let i = 0; i < 4; i++) {
+      cornerBufs.push(await QRCode.toBuffer(`https://example.com/qr2link-c${i}`, { width: 300, margin: 2 }));
+    }
+    await sharp({
+      create: { width: 800, height: 800, channels: 3, background: '#ffffff' },
+    })
+      .composite([
+        { input: cornerBufs[0], left: 40, top: 40 }, { input: cornerBufs[1], left: 460, top: 40 },
+        { input: cornerBufs[2], left: 40, top: 460 }, { input: cornerBufs[3], left: 460, top: 460 },
+      ])
+      .png()
+      .toFile(path.join(OUT_DIR, 'four-corners.png'));
+
+    // 40MP 同文双码（8000×5000，issue #1 边界锁定：>9MP 分块档位 / 阶段 2 子集行为，
+    // 两路收敛同一文本 → 恰 1 张卡片）
+    await QRCode.toFile(path.join(OUT_DIR, '.tmp-twin.png'), 'https://example.com/qr2link-twin', { width: 300, margin: 2 });
+    const twinBuf = await sharp(path.join(OUT_DIR, '.tmp-twin.png')).toBuffer();
+    await sharp({
+      create: { width: 8000, height: 5000, channels: 3, background: '#ffffff' },
+    })
+      .composite([
+        { input: twinBuf, left: 500, top: 500 },
+        { input: twinBuf, left: 6500, top: 4000 },
+      ])
+      .png({ compressionLevel: 9 })
+      .toFile(path.join(OUT_DIR, 'big-two.png'));
+    fs.rmSync(path.join(OUT_DIR, '.tmp-twin.png'), { force: true });
+
+    // 上下堆叠双码（640×640，issue #1：阶段 3 的 1×2 梯级；外部 review #2 P2 补可重复 E2E 断言。
+    // 几何对称于 two-codes.png：码 300px、近满幅，水平中线落在两码间隙 → 整体 miss、1×2 救回）
+    const tallBufs = [
+      await QRCode.toBuffer('https://example.com/qr2link-top', { width: 300, margin: 2 }),
+      await QRCode.toBuffer('https://example.com/qr2link-bottom', { width: 300, margin: 2 }),
+    ];
+    await sharp({
+      create: { width: 640, height: 640, channels: 3, background: '#ffffff' },
+    })
+      .composite([
+        { input: tallBufs[0], left: 170, top: 15 },
+        { input: tallBufs[1], left: 170, top: 325 },
+      ])
+      .png()
+      .toFile(path.join(OUT_DIR, 'stacked-tall.png'));
+
+    // 阶段选择边界资产（外部 review #2 P2）：9MP 分块档与 50MP 预算的两侧，无码纯白——
+    // 判定只看 getLastDecodeStats 阶段探针，不依赖内容（纯白 jsQR 快，聚焦阶段选择本身）
+    for (const [w, h, name] of [
+      [3000, 3000, 'bnd-9mp.png'],        // 恰 9MP → 阶段 3 全分辨率档
+      [3000, 3001, 'bnd-9mp-plus.png'],   // 9MP+300px → 降采样档
+      [8000, 6250, 'bnd-50mp.png'],       // 恰 50MP → 阶段 2/3 仍执行
+      [8000, 6251, 'bnd-50mp-plus.png'],  // 50MP+8px → 阶段 2/3 跳过
+    ]) {
+      await sharp({ create: { width: w, height: h, channels: 3, background: '#ffffff' } })
+        .png({ compressionLevel: 9 })
+        .toFile(path.join(OUT_DIR, name));
+    }
+
+    // 9MP 高频纹理（最坏全 miss 压力载体，A15 用）：调色板量化的放大噪声——高对比密集过渡
+    // 比 uniform 白底（jsQR ~40ms/MP，快速早退）与真实照片都更悲观（实测 ~480ms/MP），
+    // 用于锁定「重扫墙钟预算内完成、不触发 offscreen 15s 消息超时」（外部 review #2 P1）
+    await sharp({
+      create: { width: 750, height: 750, channels: 3, noise: { type: 'gaussian', mean: 128, sigma: 60 } },
+    })
+      .resize(3000, 3000, { kernel: 'cubic' })
+      .png({ palette: true, quality: 80 })
+      .toFile(path.join(OUT_DIR, 'worst-9mp.png'));
+
     // 最小合法 PDF（含 xref，PDFium 可读）
     const objs = [
       '1 0 obj\n<</Type/Catalog/Pages 2 0 R>>\nendobj\n',
@@ -296,6 +365,25 @@ async function suiteA(h, srv) {
     assertEq(out.spaceUrl, 'https://example.com/qr2link-trim', '带空格 URL 应 trim');
     assertEq(out.plain, null, '纯文本非 URL');
   });
+
+  await t('A14 offscreen 多码：双码图 dataURL → 2 条结果（issue #1）', async () => {
+    const out = await h.sw.evaluate(async (src) => decodeInOffscreen({ kind: 'dataURL', value: src }), fileDataUrl(path.join(TEST_DIR, 'two-codes.png')));
+    assertEq(out.length, 2, '结果数（阶段 3 分块救回双码）');
+    const texts = out.map((r) => r.text).sort();
+    assertEq(texts[0], 'https://example.com/qr2link-left', '左码文本');
+    assertEq(texts[1], 'https://example.com/qr2link-right', '右码文本');
+  });
+
+  await t('A15 offscreen 最坏全 miss（9MP 高频纹理）→ 重扫墙钟预算兜底，不触发 15s 消息超时（review #2 P1）', async () => {
+    // URL 源经本地静态服务取图（避免 7.8MB dataURL 走 sendMessage）；
+    // 该内容全梯子无截停约 17s（Node 实测）> 8s 重扫预算 → 预算截停梯子，链路整体仍须 < 15s
+    const t0 = Date.now();
+    const out = await h.sw.evaluate(async (url) => decodeInOffscreen({ kind: 'url', value: url }), `${srv.url}/out/worst-9mp.png`);
+    const ms = Date.now() - t0;
+    assertEq(out.length, 0, '无码纹理图应 0 结果');
+    assert(ms < 15000, `应在 offscreen 消息链 15s 超时内完成（实际 ${ms}ms）`);
+    console.log(`        [obs] 9MP 最坏全 miss 经 offscreen 全链路 ${ms}ms（重扫墙钟预算 8s，超时逐 tile 截停梯子）`);
+  });
 }
 
 // ================= Suite B：popup UI（标签页模式） =================
@@ -406,15 +494,20 @@ async function suiteB(h, srv) {
     assert(btns.includes('打开'), 'trim 后应识别为 URL');
   });
 
-  await t('B11 双码图上传：jsQR 整体 miss → 明确报错 + 「框选重试」出现（handoff §3 行为复现）', async () => {
+  await t('B11 双码图上传 → 阶段 3 分块救回：两张结果卡片（issue #1 主场景）', async () => {
     await goHome(page);
     await page.setInputFiles('#file-input', path.join(TEST_DIR, 'two-codes.png'));
-    await waitErr(page);
-    assertEq(await statusText(page), '未识别到二维码', '错误标题（jsQR 对双码图整体不识别，符合已知边界）');
-    assert(await page.locator('#btn-retry-crop').isVisible(), '框选重试按钮可见');
+    await waitResults(page);
+    assertEq(await page.locator('.result-card').count(), 2, '应渲染两张卡片');
+    const texts = await page.locator('.result-card .result-text').allTextContents();
+    assert(texts.includes('https://example.com/qr2link-left') && texts.includes('https://example.com/qr2link-right'),
+      `双码文本应齐全，实际 ${JSON.stringify(texts)}`);
   });
 
-  await t('B12 框选重试：拖拽选区 →「识别所选区域」→ rect 换算正确（双码图取左码）', async () => {
+  await t('B12 框选重试：超预算大图圈定右下角小码 → rect 换算正确并解码（crop 缩小范围后绕过 50MP 预算）', async () => {
+    await goHome(page);
+    await page.setInputFiles('#file-input', path.join(OUT_DIR, 'huge-over-budget.png'));
+    await waitErr(page, 30000);
     await page.locator('#btn-retry-crop').click();
     await page.locator('#view-preview').waitFor({ state: 'visible' });
     assertEq(await bodyMode(page), 'wide', '预览态应展开');
@@ -426,9 +519,9 @@ async function suiteB(h, srv) {
     }, undefined, { timeout: 8000 });
     const box = await overlay.boundingBox();
     assert(box, 'overlay 应有几何尺寸');
-    // 双码图 640×340：左码位于 x 10..310。框选左半区域
-    const x0 = box.x + box.width * 0.02, y0 = box.y + box.height * 0.06;
-    const x1 = box.x + box.width * 0.48, y1 = box.y + box.height * 0.94;
+    // 10000×6000：码位于右下角 (9820..9940, 5820..5940)。框选右下区域
+    const x0 = box.x + box.width * 0.955, y0 = box.y + box.height * 0.95;
+    const x1 = box.x + box.width * 0.999, y1 = box.y + box.height * 0.999;
     await page.mouse.move(x0, y0);
     await page.mouse.down();
     await page.mouse.move(x1, y1, { steps: 10 });
@@ -440,7 +533,7 @@ async function suiteB(h, srv) {
     assert(await btnCrop.isEnabled(), '识别所选区域应可用');
     await btnCrop.click();
     await waitResults(page);
-    assertEq(await page.locator('.result-card .result-text').first().textContent(), 'https://example.com/qr2link-left', '框选左码应得 left 结果（blob 为 B11 的双码图）');
+    assertEq(await page.locator('.result-card .result-text').first().textContent(), 'https://example.com/qr2link-huge', '框选右下角应解码出小码（rect 换算正确）');
   });
 
   await t('B13 预览态：误点（<8px）清除选区，「识别所选区域」禁用', async () => {
@@ -719,6 +812,73 @@ async function suiteB(h, srv) {
     await waitErr(page, 30000);
     assertEq(await statusText(page), '未识别到二维码', '60MP 图应被预算拦下而非全图重扫');
     assert(await page.locator('#btn-retry-crop').isVisible(), '应提供框选重试');
+  });
+
+  await t('B34 四角四码上传 → 阶段 3 的 2×2 梯级：四张结果卡片（issue #1）', async () => {
+    await goHome(page);
+    await page.setInputFiles('#file-input', path.join(OUT_DIR, 'four-corners.png'));
+    await waitResults(page);
+    assertEq(await page.locator('.result-card').count(), 4, '应渲染四张卡片');
+    const texts = await page.locator('.result-card .result-text').allTextContents();
+    for (let i = 0; i < 4; i++) {
+      assert(texts.includes(`https://example.com/qr2link-c${i}`), `缺 c${i} 结果，实际 ${JSON.stringify(texts)}`);
+    }
+  });
+
+  await t('B35 40MP 同文双码 → 恰 1 张卡片（阶段 2 命中其一或 >9MP 分块档兜底，两路收敛同一文本；issue #1 边界锁定）', async () => {
+    await goHome(page);
+    await page.setInputFiles('#file-input', path.join(OUT_DIR, 'big-two.png'));
+    await waitResults(page, 60000);
+    const texts = await page.locator('.result-card .result-text').allTextContents();
+    assertEq(texts.length, 1, '同文双码去重后应 1 张卡片');
+    assertEq(texts[0], 'https://example.com/qr2link-twin', '文本');
+  });
+
+  await t('B36 上下堆叠双码上传 → 阶段 3 的 1×2 梯级：两张结果卡片（issue #1；review #2 P2 补可重复断言）', async () => {
+    await goHome(page);
+    await page.setInputFiles('#file-input', path.join(OUT_DIR, 'stacked-tall.png'));
+    await waitResults(page);
+    assertEq(await page.locator('.result-card').count(), 2, '应渲染两张卡片');
+    const texts = await page.locator('.result-card .result-text').allTextContents();
+    assert(texts.includes('https://example.com/qr2link-top') && texts.includes('https://example.com/qr2link-bottom'),
+      `堆叠双码文本应齐全，实际 ${JSON.stringify(texts)}`);
+  });
+
+  // ---- 外部 review #2 P2：阶段选择边界（9MP 分块档 / 50MP 预算两侧）----
+  // 阈值行为无法从解码结果稳定反推 → 经 qr.js 的 getLastDecodeStats 探针严格锁定，
+  // 防止后续调整阈值时无感回归（直接调 decodeImage，不经 UI，聚焦管线本身）
+  const decodeWithStats = (pg, file) => pg.evaluate(async (src) => {
+    const results = await window.QR2Link.decodeImage(src);
+    return { texts: results.map((r) => r.text), stats: window.QR2Link.getLastDecodeStats() };
+  }, fileDataUrl(file));
+
+  await t('B37 边界：恰 9MP（3000×3000）→ 阶段 3 全分辨率档、全梯子未被墙钟预算截停', async () => {
+    const { texts, stats } = await decodeWithStats(page, path.join(OUT_DIR, 'bnd-9mp.png'));
+    assertEq(texts.length, 0, '无码图应 0 结果');
+    assertEq(stats.stages.join(''), '123', '阶段 1→2→3 应全部执行');
+    assertEq(stats.stage3FullResTiles, true, '9MP 应逐块全分辨率');
+    assertEq(stats.stage3GridsRun, 4, '四趟网格应全跑');
+    assertEq(stats.stage3DeadlineCut, false, '9MP 全梯子应在 8s 预算内（被截停即性能回归）');
+  });
+
+  await t('B38 边界：9MP+300px（3000×3001）→ 阶段 3 切换降采样档（≤2000px）', async () => {
+    const { stats } = await decodeWithStats(page, path.join(OUT_DIR, 'bnd-9mp-plus.png'));
+    assertEq(stats.stages.join(''), '123', '阶段 1→2→3 应全部执行');
+    assertEq(stats.stage3FullResTiles, false, '超 9MP 应逐块降采样');
+    assertEq(stats.stage3GridsRun, 4, '降采样档全梯子应全跑');
+  });
+
+  await t('B39 边界：恰 50MP（8000×6250）→ 阶段 2/3 仍执行（预算为闭区间）', async () => {
+    const { stats } = await decodeWithStats(page, path.join(OUT_DIR, 'bnd-50mp.png'));
+    assert(stats.stages.includes('2'), `50MP 应执行阶段 2，实际 ${JSON.stringify(stats.stages)}`);
+    assert(stats.stages.includes('3') && stats.stage3GridsRun >= 1, '50MP 应执行阶段 3（至少一趟网格）');
+  });
+
+  await t('B40 边界：50MP+8px（8000×6251）→ 阶段 2/3 跳过（review #3 契约边界）', async () => {
+    const { texts, stats } = await decodeWithStats(page, path.join(OUT_DIR, 'bnd-50mp-plus.png'));
+    assertEq(texts.length, 0, '无码图应 0 结果');
+    assertEq(stats.stages.join(''), '1', '仅阶段 1（降采样快扫）');
+    assertEq(stats.stage3GridsRun, 0, '阶段 3 不应执行');
   });
 
   await cleanup();
