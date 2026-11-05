@@ -106,8 +106,8 @@
       });
     }, function (err) {
       state.busy = false;
-      var key = err && err.message === 'IMAGE_FETCH_FAILED' ? 'errFetchImage' : 'errImageDecode';
-      showError(T[key], '', true);
+      // 直接引用字面量 key（T.errFetchImage / T.errImageDecode），落入 check-locales 引用闭包静态校验
+      showError(err && err.message === 'IMAGE_FETCH_FAILED' ? T.errFetchImage : T.errImageDecode, '', true);
     });
   }
 

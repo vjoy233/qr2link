@@ -434,3 +434,18 @@ zh_CN 列 = 现网文案原样搬运（零改动）；en 列已按 grill Q5 拍�
 ### 交付物清单
 
 `_locales/{en,zh_CN}/messages.json`（42 key）、`i18n.js`（getMessage 装配）、`manifest.json`（v1.1.0 / default_locale=en / __MSG_）、`popup.js`（html lang）、`background.js`（onStartup 菜单重建 + justification 英文化）、`pack-zip.mjs`（+_locales）、`scripts/check-locales.mjs` + `npm run check:locales`、`test/e2e/{helpers,run-all,probe-lang}.cjs`（双语回归）、`README.en.md` / `PRIVACY.en.md`（全译）+ 中英互链、`DESIGN.md` v1.7、本文件实施记录。
+
+### PR #3「Review by AIbot」采纳记录（2026-11-05，review 基线 44851a9）
+
+外部 AI review 三条意见（P2×2 + P3）经分析**全部采纳**，均为守门强化、零产品行为变化：
+
+| 意见 | 采纳处置 |
+|------|----------|
+| P2：重复 key 检查依赖换行排版，同行/压缩形态漏检（`JSON.parse` 静默取后者） | `check-locales.mjs` 改用**字符串感知状态机**扫描原始文本（跟踪引号/转义/花括号深度，只认根对象成员名），与排版无关 |
+| P2：引用闭包先按格式过滤——`data-i18n="btn_screenshot"` 类 snake 拼错被正则忽略而非拒绝；`runDecode` 计算 key 分支在扫描盲区 | ① data-i18n 改为**先收集任意格式取值、再对照 KEYS**；② `popup.js` `runDecode` 消灭计算 key（`T.errFetchImage`/`T.errImageDecode` 直接引用，落入静态扫描）；③ 计算式访问（`T[变量]`）实行**登记制**——仅允许 applyI18n 的 2 处（key 来源已被 4a 全量校验），新增必须登记 |
+| P3：`default_locale` 只查字段存在，值指向不存在语言包仍退出 0 | 解析 manifest 后校验值必须有对应 `_locales/` 目录（读目录现查，不硬编码） |
+| review 要求补失败用例 | 新增 `--self-test` 变异测试模式：6 个用例（同行重复 key / snake 绑定 / key 拼写 / 计算式访问 / default_locale 无语言包 / 正常基线）全部按预期捕获，**守门自身也被回归锁定** |
+
+review 其余事项：「已接受不阻塞」各项与 Q1–Q6 拍板一致；其 macOS 环境 `--lang` 不生效属平台差异（Windows 宿主实测 zh-CN/en-US/fr 三路均正确翻转，且 3×69 双语矩阵在本仓证据充分），无需处置。
+
+修复后验证：`check:locales` ✅ + `--self-test` 6/6 ✅ + e2e chromium×zh-CN **69/69** ✅（第 0 步同时实测新守门作为 run-all 前置）。
