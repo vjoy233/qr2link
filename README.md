@@ -97,7 +97,7 @@ node scripts/gen-icons.mjs# 重新生成图标 PNG
 
 ### 自动化验收（test/e2e）
 
-Playwright 驱动真实浏览器加载未打包扩展跑 62 条验收用例（DESIGN §8 的可自动化子集）：
+Playwright 驱动真实浏览器加载未打包扩展跑 68 条验收用例（DESIGN §8 的可自动化子集）：
 
 ```bash
 cd test/e2e
