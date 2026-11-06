@@ -309,3 +309,6 @@ section[hidden] { display: none; }
   color: var(--accent);
   pointer-events: none;
 }
+/* 作者 display:flex 会覆盖 UA 对 [hidden] 的 display:none —— 必须显式还原，
+   否则覆盖层在未拖拽时也常驻可见（display:flex 优先级高于 hidden 属性） */
+#drop-overlay[hidden] { display: none; }

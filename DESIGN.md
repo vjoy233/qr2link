@@ -1,6 +1,6 @@
 # QR2Link — 二维码转网页链接 Chrome 插件 · 方案设计文档
 
-> 版本：v1.6（2026-11-05）
+> 版本：v1.7（2026-11-05）
 > 状态：已评审通过（含外部 review 修订 + grill 自审拷问）
 > 项目目录：`D:\Vibing\qr2link`
 
@@ -8,6 +8,7 @@
 
 | 版本 | 说明 |
 |------|------|
+| v1.7 | 中英双语适配（I18N-PLAN.md，D1–D4 + grill Q1–Q6 全部拍板）：① 接入 chrome.i18n——新增 `_locales/{en,zh_CN}`（42 key），`i18n.js` 改为 getMessage 装配（对外 `self.I18N` 接口与 key 零变化，兑现 v1.2「文案收口」承诺）；manifest `description`/快捷键描述走 `__MSG_`，`default_locale=en`（未知语言回落英文，D1）；名称保持 QR2Link 不翻译（D2）。② `<html lang>` 按 `locale_lang` 自描述 key 设定（比 getUILanguage 更准，可识别 default 回落）；右键菜单补 `onStartup` 重建（浏览器改语言重启后标题跟随）。③ 守门与发布：`pack-zip` INCLUDE 补 `_locales`（漏装=扩展损坏）；新增 `scripts/check-locales.mjs` 静态校验（key 奇偶/非空/引用闭包/manifest token），run-all 第 0 步强制执行 + 发版清单（Q3，不建 CI）。④ e2e 双语化：`--lang` 启动参数 + `msg()` 期望文案助手（与 `_locales` 同源），21 处硬编码中文断言去硬编码；新增 A3b（manifest 解析）/B1 扩展（html lang）；同一套 69 用例 `QR2LINK_E2E_LANG={zh-CN,en-US}` 双语回归（Q4：en 仅 chromium）。⑤ 文档：README/PRIVACY 英文版独立文件 + 互链（D4）；zh-TW/HK 无繁体包回落英文（Q2 拍板接受，README 已知限制 + issue 待办）。⑥ 版本 1.0.0→1.1.0（Q6）。⑦ 真实弹窗实测（computer use 全链路）发现两处发布级缺陷并修复：发布 zip 条目分隔符 `\`→`/`（Compress-Archive 缺陷，CR store 拒收 + 严格解压工具破坏 `_locales`，pack-zip 内置字节级自检）；`#drop-overlay` 常驻可见（`display:flex` 压过 `hidden` 属性，v1.0 起即存在，补 `[hidden]{display:none}` + B1 回归断言） |
 | v1.6 | PR #2 外部 review 采纳合入：① 重扫墙钟预算——自阶段 2 起算 8s，阶段 3 梯子逐 tile 检查、超时截停（像素预算只限扫描量、无法跨设备换算耗时上界，单机实测不构成证明；review P1。注：review 中「24 tile × 9MP ≈ 216MP/864MB」的算术有误，每趟网格累计处理量 ≈ rect 面积，全梯子 ≈ 4×rect（9MP 时约 36MP），但其「最坏情形须有界」的结论成立，仍采纳）；② 新增 `QR2Link.getLastDecodeStats()` 测试探针（阶段选择记录，E2E 边界用例锁定 9MP/50MP 阈值，review P2）；③ 补堆叠双码（1×2 梯级）可重复 E2E 断言与 offscreen 最坏全 miss 回归用例（review P2）；④ TEST-RESULTS 顶部口径重构为「当前迭代唯一总览」（review P2） |
 | v1.0 | 初版设计 |
 | v1.1 | 合入外部 review：补齐 Manifest 权限（offscreen/storage/commands/clipboardWrite）、BarcodeDetector 改运行时能力检测、多码承诺降调、两阶段解码替代固定降采样、隐私声明修正、历史默认关闭、截图新增框选裁剪、测试矩阵扩充 |
@@ -20,8 +21,8 @@
 
 | 项 | 决策 |
 |---|---|
-| 名称 | **QR2Link**（manifest `name` 纯英文，`description` 中文） |
-| UI 语言 | **仅中文**；全部文案收口到独立常量文件，后补 chrome.i18n 双语只需翻译 |
+| 名称 | **QR2Link**（manifest `name` 纯英文不翻译，`description` 经 `__MSG_` 双语） |
+| UI 语言 | **中英双语（chrome.i18n）**：`_locales/{en,zh_CN}`，`default_locale=en` 未知语言回落英文；文案经 `i18n.js` 装配收口（v1.7） |
 | 目标浏览器 | **Chrome + Edge**（单套 Chromium MV3 代码；Edge 逐项实测。Firefox 明确排除——其无 offscreen API，避免双后台架构） |
 | 分发方式 | **按可上架标准准备**：图标、PRIVACY.md、权限用途声明一步到位；暂不提交审核 / 不注册开发者账号，上架时补公网隐私政策 URL 即可 |
 
@@ -120,11 +121,12 @@ async function canUseNativeQr() {
 
 ```
 qr2link/
-├── manifest.json          # MV3 清单
+├── manifest.json          # MV3 清单（default_locale=en，描述走 __MSG_）
+├── _locales/              # chrome.i18n 语言包（en + zh_CN，42 key；check-locales 守门）
 ├── background.js          # Service Worker：快捷键直扫、右键菜单、offscreen 生命周期
 ├── offscreen.html/.js     # Offscreen 文档：为 SW 提供 canvas 解码环境（仅快捷键/右键链路使用）
 ├── qr.js                  # 共享解码模块（popup / offscreen 共用）
-├── i18n.js                # UI 文案常量收口（仅中文；后补 chrome.i18n 时替换此处）
+├── i18n.js                # UI 文案装载（chrome.i18n → self.I18N，调用方零改动）
 ├── popup/
 │   ├── popup.html         # 主 UI
 │   ├── popup.js
@@ -319,7 +321,7 @@ function parseHttpUrl(raw) {
 4. **反色码**：jsQR `inversionAttempts:'attemptBoth'`；原生引擎按平台自身行为，不承诺
 5. **焦点**：`navigator.clipboard.read()` 要求 document 聚焦，popup 打开时天然满足；paste 双通道兜底
 6. **内存**：大图解码后立即 `bitmap.close()`、canvas 置空、Blob 引用释放
-7. **文案收口**（`i18n.js`）：所有 UI 字符串集中常量管理，后续接 chrome.i18n 只做翻译映射
+7. **文案收口**（`i18n.js` → chrome.i18n，v1.7）：UI 字符串全量迁入 `_locales/{en,zh_CN}`，`i18n.js` 以 getMessage 装配 `self.I18N`（key 与调用方零变化）；key 三处同源由 `scripts/check-locales.mjs` 静态校验（run-all 前置 + 发版清单）
 
 ---
 

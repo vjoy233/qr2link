@@ -1,0 +1,170 @@
+{
+  "app_name": {
+    "message": "QR2Link",
+    "description": "品牌名；各语言一致"
+  },
+  "app_subtitle": {
+    "message": "二维码 → 链接",
+    "description": "头部副标题"
+  },
+  "btn_screenshot": {
+    "message": "截取当前网页",
+    "description": "主页入口按钮：截取当前标签页可视区域"
+  },
+  "btn_screenshot_sub": {
+    "message": "截取当前标签页可视区域",
+    "description": "主页入口按钮副行"
+  },
+  "btn_upload": {
+    "message": "上传图片",
+    "description": "主页入口按钮：选择本地图片文件"
+  },
+  "btn_upload_sub": {
+    "message": "选择本地图片文件",
+    "description": "主页入口按钮副行"
+  },
+  "btn_clipboard": {
+    "message": "读取剪贴板图片",
+    "description": "主页宽按钮：读取剪贴板图片"
+  },
+  "input_hint": {
+    "message": "支持 Ctrl+V 粘贴 · 也可拖拽图片到此窗口",
+    "description": "三入口下方提示行"
+  },
+  "drop_here": {
+    "message": "松开以识别图片",
+    "description": "拖拽覆盖层文案"
+  },
+  "crop_hint": {
+    "message": "在预览图中拖拽框选二维码区域（可选，不选则全图识别）",
+    "description": "预览/框选视图提示"
+  },
+  "btn_scan_full": {
+    "message": "全图识别",
+    "description": "框选视图操作：识别整图"
+  },
+  "btn_scan_crop": {
+    "message": "识别所选区域",
+    "description": "框选视图操作：识别框选矩形"
+  },
+  "btn_back": {
+    "message": "返回",
+    "description": "预览/结果视图返回主页"
+  },
+  "decoding": {
+    "message": "识别中…",
+    "description": "解码中 spinner 标题"
+  },
+  "err_no_qr_title": {
+    "message": "未识别到二维码",
+    "description": "未解出任何码的错误标题"
+  },
+  "err_no_qr_hint": {
+    "message": "可框选二维码区域后重试，或更换更清晰的图片",
+    "description": "引导框选重试或换图"
+  },
+  "err_capture_title": {
+    "message": "截图失败",
+    "description": "captureVisibleTab 被拒的错误标题"
+  },
+  "err_capture_hint": {
+    "message": "当前页面可能不允许截图。请用系统截图（如 Win+Shift+S）后粘贴，或上传图片",
+    "description": "页面不可截时的引导"
+  },
+  "err_clipboard_no_image": {
+    "message": "剪贴板中没有图片",
+    "description": "剪贴板无图片的错误标题"
+  },
+  "err_clipboard_read": {
+    "message": "剪贴板读取失败",
+    "description": "剪贴板 read() 拒绝的错误标题"
+  },
+  "err_clipboard_read_hint": {
+    "message": "请先点击弹窗内任意位置再试，或直接按 Ctrl+V",
+    "description": "剪贴板权限失败的引导"
+  },
+  "err_image_decode": {
+    "message": "图片无法读取",
+    "description": "图片不可解码的错误标题"
+  },
+  "err_fetch_image": {
+    "message": "图片获取失败（可能受跨域或网络限制）",
+    "description": "远程图片获取失败的错误标题（右键链路）"
+  },
+  "btn_retry_crop": {
+    "message": "框选重试",
+    "description": "错误视图按钮：用同一图片重新框选"
+  },
+  "btn_open": {
+    "message": "打开",
+    "description": "结果卡片操作：新标签页打开 http/https 链接"
+  },
+  "btn_copy": {
+    "message": "复制",
+    "description": "结果卡片操作：复制文本到剪贴板"
+  },
+  "btn_keep": {
+    "message": "保留",
+    "description": "结果卡片操作：存入历史（历史开启时可见）"
+  },
+  "copied": {
+    "message": "已复制",
+    "description": "复制成功后的按钮反馈"
+  },
+  "copy_failed": {
+    "message": "复制失败",
+    "description": "复制失败后的按钮反馈"
+  },
+  "kept": {
+    "message": "已保留",
+    "description": "保留成功后的按钮反馈"
+  },
+  "text_label": {
+    "message": "文本",
+    "description": "非 URL 结果的 meta 标签"
+  },
+  "history_title": {
+    "message": "最近识别",
+    "description": "历史面板标题"
+  },
+  "history_off": {
+    "message": "历史记录已关闭，开启后可保留识别结果",
+    "description": "历史关闭时的占位说明"
+  },
+  "history_empty": {
+    "message": "暂无保留的记录",
+    "description": "历史为空时的占位说明"
+  },
+  "history_clear": {
+    "message": "清空",
+    "description": "历史面板：清空按钮（两步确认）"
+  },
+  "history_clear_confirm": {
+    "message": "确认清空？",
+    "description": "历史面板：两步确认的翻转态"
+  },
+  "history_delete": {
+    "message": "删除",
+    "description": "历史条目操作：删除单条"
+  },
+  "menu_scan_image": {
+    "message": "识别图中二维码",
+    "description": "图片右键菜单项"
+  },
+  "badge_fail": {
+    "message": "✕",
+    "description": "失败时工具栏 badge；符号语言中立"
+  },
+  "locale_lang": {
+    "message": "zh-CN",
+    "description": "内部用：实际命中语言包的 BCP47 标签，用于设置 <html lang>（比 getUILanguage 更准，可识别 default 回落）"
+  },
+  "manifest_description": {
+    "message": "截图 / 上传 / 粘贴图片，本地识别二维码并打开网页链接",
+    "description": "manifest / 商店中的扩展描述"
+  },
+  "command_scan_description": {
+    "message": "截图并识别当前网页中的二维码",
+    "description": "快捷键在 chrome://extensions/shortcuts 的描述"
+  }
+}

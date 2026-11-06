@@ -1,6 +1,10 @@
 # QR2Link
 
+中文 | [English](README.en.md)
+
 把含二维码的图片在**本地**识别成文本或网页链接，并可一键打开的 Chrome / Edge 扩展（Manifest V3，无需构建，零第三方网络上传）。
+
+界面语言自动跟随浏览器：内置简体中文（zh-CN）与英文，其余语言回落英文。
 
 遇到网页上的登录码、支付码、分享码，不用再掏手机——让浏览器自己「看懂」二维码。
 
@@ -20,6 +24,11 @@
 - **右键识别**：任意图片右键 →「识别图中二维码」（远程跨域图片属实验性，见下）
 - **识别历史**：默认关闭；开启后仅保存你主动点「保留」的文本结果（≤20 条，不存图片）
 - **双引擎解码**：原生 BarcodeDetector（可用时支持一图多码）+ jsQR 兜底（反色码支持）；三阶段策略（降采样快扫 → 原图全分辨率重试 → 无结果时象限分块重扫），覆盖大图小码与多码同图场景
+- **中英双语**：界面（含右键菜单、快捷键说明、商店描述）随浏览器语言自动切换，见 [I18N-PLAN.md](I18N-PLAN.md)
+
+## 已知限制
+
+- zh-TW / zh-HK 浏览器暂无繁体语言包，界面回落英文（简体用户不受影响）；后续按需补充 `_locales/zh_TW`
 
 ## 安装（开发者模式加载）
 
@@ -75,10 +84,11 @@
 ```
 qr2link/
 ├── manifest.json       # MV3 清单（无构建，仓库根即扩展根）
+├── _locales/           # chrome.i18n 语言包（en + zh_CN，default_locale=en）
 ├── background.js       # Service Worker：快捷键直扫、右键菜单、offscreen 生命周期
 ├── offscreen.html/.js  # 隐藏解码文档（仅快捷键/右键链路使用）
 ├── qr.js               # 共享解码模块（双引擎 + 三阶段，popup/offscreen 共用）
-├── i18n.js             # UI 文案常量收口（仅中文）
+├── i18n.js             # UI 文案装载（chrome.i18n → self.I18N，调用方零改动）
 ├── popup/              # 弹窗：三入口、框选裁剪组件、结果卡片、历史
 ├── lib/jsQR.js         # jsQR 1.4.0 官方 dist（vendor 锁版本）
 ├── icons/              # 图标（icon.svg 为源稿，scripts/gen-icons.mjs 生成 PNG）
@@ -89,6 +99,7 @@ qr2link/
 npm install               # 仅开发/测试依赖（qrcode、sharp 等）
 node test/gen-qr.mjs      # 重新生成测试二维码样例
 node scripts/gen-icons.mjs# 重新生成图标 PNG
+npm run check:locales     # _locales 完整性校验（key 奇偶/引用闭包/manifest token）
 ```
 
 浏览器打开 `test/index.html` 即可开始手工验证（截图 / 上传 / 粘贴 / 快捷键 / 右键）。
@@ -97,12 +108,13 @@ node scripts/gen-icons.mjs# 重新生成图标 PNG
 
 ### 自动化验收（test/e2e）
 
-Playwright 驱动真实浏览器加载未打包扩展跑 68 条验收用例（DESIGN §8 的可自动化子集）：
+Playwright 驱动真实浏览器加载未打包扩展跑 69 条验收用例（DESIGN §8 的可自动化子集），同一套用例支持中英双语回归（断言文案与 `_locales` 同源）：
 
 ```bash
 cd test/e2e
-NODE_PATH="$(npm root -g)" node run-all.cjs msedge   # 主环境 Edge（需本机装有 Playwright 全局包）
-NODE_PATH="$(npm root -g)" node run-all.cjs chromium # 交叉验证
+NODE_PATH="$(npm root -g)" node run-all.cjs msedge                           # 主环境 Edge，中文（需本机装有 Playwright 全局包）
+NODE_PATH="$(npm root -g)" node run-all.cjs chromium                         # 交叉验证，中文
+QR2LINK_E2E_LANG=en-US NODE_PATH="$(npm root -g)" node run-all.cjs chromium  # 英文回归
 ```
 
 - 品牌版 Chrome 137+ 已移除 `--load-extension`，自动化请在 Edge / Playwright Chromium 跑；Chrome 手工项见 `TEST-RESULTS.md` §6

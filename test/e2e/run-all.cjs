@@ -3,6 +3,8 @@
  *
  * 用法：NODE_PATH="$(npm root -g)" node run-all.cjs <msedge|chromium|chrome> [suite]
  *   suite: A(SW链路) B(popup UI) C(截图主路径) D(手势/特殊页)，缺省全部
+ *   语言：QR2LINK_E2E_LANG=zh-CN（缺省）| en-US —— 同一套用例双语回归（I18N-PLAN §4.8），
+ *         断言文案经 msg() 读 _locales，与启动 --lang 同源；报告文件名带语言后缀
  *
  * 环境前提（见 probe-load/probe-popup 结论）：
  *   - 品牌 Chrome 137+ 忽略 --load-extension → 用 msedge（同引擎）或 chromium 通道
@@ -14,15 +16,17 @@
 
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 const {
   launch, openPopupTab, serveStatic, setClipboard, osSendKeys, sleep,
-  getClipboardText, EXT_DIR, TEST_DIR,
+  getClipboardText, msg, uiLang, EXT_DIR, TEST_DIR,
 } = require('./helpers.cjs');
 
 const OUT_DIR = path.join(TEST_DIR, 'out');
 const REPORT_DIR = path.join(__dirname, 'report');
 const CHANNEL = process.argv[2] || 'msedge';
 const ONLY = process.argv[3] || 'ABCD';
+const LANG = uiLang(); // 本轮启动语言（--lang 与断言 msg() 均以此为源）
 const OS_PROC = CHANNEL === 'msedge' ? 'msedge' : 'chrome';
 
 // ---------------- 微型测试框架 ----------------
@@ -257,7 +261,16 @@ async function suiteA(h, srv) {
     if (r.skip) { console.log('        [skip] ' + r.skip); return; }
     assertEq(r.items.length, 1, '菜单项数量');
     assert(r.items[0].contexts.includes('image'), '菜单应限定 image 上下文');
-    assertEq(r.items[0].title, '识别图中二维码', '菜单标题');
+    assertEq(r.items[0].title, msg('menu_scan_image'), '菜单标题');
+  });
+
+  await t('A3b manifest __MSG__ 按语言解析（i18n N1：description / 快捷键描述）', async () => {
+    const m = await h.sw.evaluate(() => {
+      const mf = chrome.runtime.getManifest();
+      return { desc: mf.description, cmd: mf.commands['scan-current-page'].description };
+    });
+    assertEq(m.desc, msg('manifest_description'), 'manifest description');
+    assertEq(m.cmd, msg('command_scan_description'), '快捷键 description');
   });
 
   await t('A4 offscreen 解码 dataURL（normal.png → URL，engine=jsqr）', async () => {
@@ -399,16 +412,20 @@ async function suiteB(h, srv) {
     await h.sw.evaluate(() => chrome.storage.local.clear()).catch(() => {});
   };
 
-  await t('B1 初始态：i18n 中文渲染 / home 视图 / 紧凑 400px / 历史默认关', async () => {
+  await t('B1 初始态：i18n 渲染（当前语言包）/ home 视图 / 紧凑 400px / 历史默认关', async () => {
     await boot();
-    assertEq(await page.locator('#btn-screenshot .entry-label').textContent(), '截取当前网页', 'i18n 截图按钮');
-    assertEq(await page.locator('#btn-upload .entry-label').textContent(), '上传图片', 'i18n 上传按钮');
-    assertEq(await page.locator('#btn-clipboard').textContent(), '读取剪贴板图片', 'i18n 剪贴板按钮');
+    assertEq(await page.locator('#btn-screenshot .entry-label').textContent(), msg('btn_screenshot'), 'i18n 截图按钮');
+    assertEq(await page.locator('#btn-upload .entry-label').textContent(), msg('btn_upload'), 'i18n 上传按钮');
+    assertEq(await page.locator('#btn-clipboard').textContent(), msg('btn_clipboard'), 'i18n 剪贴板按钮');
+    // i18n N2：<html lang> 跟随实际命中的语言包（locale_lang 自描述值，可识别 default 回落）
+    assertEq(await page.evaluate(() => document.documentElement.lang), msg('locale_lang'), 'html lang');
     assertEq(await bodyMode(page), 'compact', '默认紧凑态');
     assert(Math.abs((await bodyWidth(page)) - 400) <= 2, '宽度应约 400px');
     assertEq(await page.locator('#history-toggle').isChecked(), false, '历史开关默认关');
     assert(await page.locator('#history-clear').isHidden(), '清空按钮默认隐藏');
-    assert((await page.locator('#history-list').textContent()).includes('历史记录已关闭'), '历史关闭提示');
+    assert((await page.locator('#history-list').textContent()).includes(msg('history_off')), '历史关闭提示');
+    // 拖拽覆盖层未拖拽时必须不可见（popup.css 的 display:flex 会压过 hidden 属性，回归锁定）
+    assert(await page.locator('#drop-overlay').isHidden(), '拖拽覆盖层默认隐藏');
   });
 
   await t('B2 上传 normal.png → URL 结果卡片 + 宽度切 760', async () => {
@@ -419,25 +436,25 @@ async function suiteB(h, srv) {
     assertEq(text, 'https://example.com/qr2link-test', '结果文本');
     assertEq(meta, 'URL', 'URL 卡片 meta');
     const btns = await page.locator('.result-card .mini-btn').allTextContents();
-    assert(btns.includes('打开'), '应有打开按钮');
-    assert(btns.includes('复制'), '应有复制按钮');
-    assert(!btns.includes('保留'), '历史关闭时无保留按钮');
+    assert(btns.includes(msg('btn_open')), '应有打开按钮');
+    assert(btns.includes(msg('btn_copy')), '应有复制按钮');
+    assert(!btns.includes(msg('btn_keep')), '历史关闭时无保留按钮');
     assertEq(await bodyMode(page), 'wide', '结果视图应展开');
     assert(Math.abs((await bodyWidth(page)) - 760) <= 2, '宽度应约 760px');
   });
 
   await t('B3 「打开」→ 新前台标签页打开链接', async () => {
-    await page.locator('.result-card .mini-btn', { hasText: '打开' }).first().click();
+    await page.locator('.result-card .mini-btn', { hasText: msg('btn_open') }).first().click();
     const opened = await waitTabByUrl(h, 'example.com/qr2link-test');
     assert(opened, '12s 内应打开 https://example.com/qr2link-test');
     await opened.close().catch(() => {});
   });
 
   await t('B4 「复制」→ 系统剪贴板写入 + 按钮反馈「已复制」', async () => {
-    await page.locator('.result-card .mini-btn', { hasText: '复制' }).first().click();
+    await page.locator('.result-card .mini-btn', { hasText: msg('btn_copy') }).first().click();
     await sleep(300);
     assertEq(await getClipboardText(), 'https://example.com/qr2link-test', '剪贴板文本');
-    assertEq(await page.locator('.result-card .mini-btn', { hasText: '已复制' }).count() >= 0 ? true : true, true); // flash 1.2s，宽松验证
+    assertEq(await page.locator('.result-card .mini-btn', { hasText: msg('copied') }).count() >= 0 ? true : true, true); // flash 1.2s，宽松验证
   });
 
   await t('B5 文本码（WiFi）：仅展示 + 复制，无「打开」', async () => {
@@ -447,10 +464,10 @@ async function suiteB(h, srv) {
     const meta = await page.locator('.result-card .result-meta').first().textContent();
     const text = await page.locator('.result-card .result-text').first().textContent();
     assertEq(text, 'WIFI:T:WPA;S:ssid;P:pass;;', '结果文本');
-    assert(meta.startsWith('文本') && meta.includes('jsqr'), `meta 应为「文本 · jsqr」，实际 ${meta}`);
+    assert(meta.startsWith(msg('text_label')) && meta.includes('jsqr'), `meta 应为「${msg('text_label')} · jsqr」，实际 ${meta}`);
     const btns = await page.locator('.result-card .mini-btn').allTextContents();
-    assert(!btns.includes('打开'), '非 URL 不应有打开按钮');
-    assert(btns.includes('复制'), '应有复制按钮');
+    assert(!btns.includes(msg('btn_open')), '非 URL 不应有打开按钮');
+    assert(btns.includes(msg('btn_copy')), '应有复制按钮');
   });
 
   await t('B6 上传 120px 小码 small.png → 识别成功', async () => {
@@ -491,7 +508,7 @@ async function suiteB(h, srv) {
     await waitResults(page);
     assertEq(await page.locator('.result-card .result-text').first().textContent(), 'https://example.com/qr2link-trim', 'trim 文本');
     const btns = await page.locator('.result-card .mini-btn').allTextContents();
-    assert(btns.includes('打开'), 'trim 后应识别为 URL');
+    assert(btns.includes(msg('btn_open')), 'trim 后应识别为 URL');
   });
 
   await t('B11 双码图上传 → 阶段 3 分块救回：两张结果卡片（issue #1 主场景）', async () => {
@@ -583,7 +600,7 @@ async function suiteB(h, srv) {
     setClipboard('text', { text: 'hello plain text' });
     await page.locator('#btn-clipboard').click();
     await waitErr(page);
-    assertEq(await statusText(page), '剪贴板中没有图片', '错误标题');
+    assertEq(await statusText(page), msg('err_clipboard_no_image'), '错误标题');
   });
 
   await t('B18 剪贴板图片（按钮主动读通道）→ 解码成功', async () => {
@@ -608,7 +625,7 @@ async function suiteB(h, srv) {
     setClipboard('text', { text: 'just text' });
     await page.keyboard.press('Control+v');
     await waitErr(page);
-    assertEq(await statusText(page), '剪贴板中没有图片', '错误标题');
+    assertEq(await statusText(page), msg('err_clipboard_no_image'), '错误标题');
   });
 
   await t('B21 剪贴板文本+图片混合 → 只取图片', async () => {
@@ -638,9 +655,9 @@ async function suiteB(h, srv) {
     await goHome(page);
     await page.locator('#btn-screenshot').click();
     await waitErr(page);
-    assertEq(await statusText(page), '截图失败', '错误标题');
-    const hint = await page.locator('#status-hint').textContent();
-    assert(hint.includes('Win+Shift+S') || hint.includes('粘贴'), `引导文案应提示系统截图/粘贴，实际：${hint}`);
+    assertEq(await statusText(page), msg('err_capture_title'), '错误标题');
+    // 引导文案整句精确匹配（与 _locales 同源，双语各自成立）
+    assertEq(await page.locator('#status-hint').textContent(), msg('err_capture_hint'), '引导文案');
     assert(await page.locator('#btn-retry-crop').isHidden(), '截图失败不应提供框选重试');
   });
 
@@ -651,8 +668,8 @@ async function suiteB(h, srv) {
     await page.setInputFiles('#file-input', path.join(TEST_DIR, 'normal.png'));
     await waitResults(page);
     const btns = await page.locator('.result-card .mini-btn').allTextContents();
-    assert(btns.includes('保留'), '历史开启后结果卡片应有保留按钮');
-    await page.locator('.result-card .mini-btn', { hasText: '保留' }).first().click();
+    assert(btns.includes(msg('btn_keep')), '历史开启后结果卡片应有保留按钮');
+    await page.locator('.result-card .mini-btn', { hasText: msg('btn_keep') }).first().click();
     await sleep(300);
     const items = await page.locator('#history-list .history-item').count();
     assertEq(items, 1, '历史列表应有一条');
@@ -666,12 +683,12 @@ async function suiteB(h, srv) {
   await t('B25 历史条目：打开 / 删除 / 两步确认清空', async () => {
     await goHome(page);
     // 打开
-    await page.locator('#history-list .history-item .mini-btn', { hasText: '打开' }).first().click();
+    await page.locator('#history-list .history-item .mini-btn', { hasText: msg('btn_open') }).first().click();
     const opened = await waitTabByUrl(h, 'example.com/qr2link-test');
     assert(opened, '历史「打开」应开新标签页');
     await opened.close().catch(() => {});
     // 删除
-    await page.locator('#history-list .history-item .mini-btn', { hasText: '删除' }).first().click();
+    await page.locator('#history-list .history-item .mini-btn', { hasText: msg('history_delete') }).first().click();
     await sleep(200);
     assertEq(await page.locator('#history-list .history-item').count(), 0, '删除后列表应空');
     const stored = await page.evaluate(() => chrome.storage.local.get(null));
@@ -679,11 +696,11 @@ async function suiteB(h, srv) {
     // 清空（先造一条）
     await page.setInputFiles('#file-input', path.join(TEST_DIR, 'small.png'));
     await waitResults(page);
-    await page.locator('.result-card .mini-btn', { hasText: '保留' }).first().click();
+    await page.locator('.result-card .mini-btn', { hasText: msg('btn_keep') }).first().click();
     await goHome(page);
     await sleep(200);
     await page.locator('#history-clear').click();
-    assertEq(await page.locator('#history-clear').textContent(), '确认清空？', '第一次点击应翻转确认');
+    assertEq(await page.locator('#history-clear').textContent(), msg('history_clear_confirm'), '第一次点击应翻转确认');
     await page.locator('#history-clear').click();
     await sleep(200);
     assertEq(await page.locator('#history-list .history-item').count(), 0, '确认后应清空');
@@ -692,15 +709,15 @@ async function suiteB(h, srv) {
   await t('B26 清空确认 3 秒未确认 → 自动还原', async () => {
     await page.setInputFiles('#file-input', path.join(TEST_DIR, 'small.png'));
     await waitResults(page);
-    await page.locator('.result-card .mini-btn', { hasText: '保留' }).first().click();
+    await page.locator('.result-card .mini-btn', { hasText: msg('btn_keep') }).first().click();
     await goHome(page);
     await sleep(250);
     const before = await page.evaluate(() => chrome.storage.local.get(null));
     assertEq((before['qr2link.history.items'] || []).length, 1, `保留后应恰 1 条（实际 ${JSON.stringify(before['qr2link.history.items'])}）`);
     await page.locator('#history-clear').click();
-    assertEq(await page.locator('#history-clear').textContent(), '确认清空？', '进入确认态');
+    assertEq(await page.locator('#history-clear').textContent(), msg('history_clear_confirm'), '进入确认态');
     await sleep(3300);
-    assertEq(await page.locator('#history-clear').textContent(), '清空', '3 秒后应自动还原');
+    assertEq(await page.locator('#history-clear').textContent(), msg('history_clear'), '3 秒后应自动还原');
     assertEq(await page.locator('#history-list .history-item').count(), 1, '未确认不清空');
   });
 
@@ -717,7 +734,7 @@ async function suiteB(h, srv) {
     // 再保留一条 → 23 条截断为 20（最新的在前）
     await page.setInputFiles('#file-input', path.join(TEST_DIR, 'normal.png'));
     await waitResults(page);
-    await page.locator('.result-card .mini-btn', { hasText: '保留' }).first().click();
+    await page.locator('.result-card .mini-btn', { hasText: msg('btn_keep') }).first().click();
     await sleep(250);
     const stored = await page.evaluate(() => chrome.storage.local.get(null));
     assertEq(stored['qr2link.history.items'].length, 20, '存储上限 20 条');
@@ -728,7 +745,7 @@ async function suiteB(h, srv) {
     await goHome(page);
     await page.locator('label.switch').click(); // 关
     await sleep(250);
-    assert((await page.locator('#history-list').textContent()).includes('历史记录已关闭'), '关闭提示');
+    assert((await page.locator('#history-list').textContent()).includes(msg('history_off')), '关闭提示');
     const stored = await page.evaluate(() => chrome.storage.local.get(null));
     assertEq(stored['qr2link.history.enabled'], false, '开关持久化');
     assert(stored['qr2link.history.items'].length > 0, '关闭不清数据（重开可见）');
@@ -792,7 +809,7 @@ async function suiteB(h, srv) {
       assertEq(canUse, false, '不含 qr_code 应判不可用');
       await p.setInputFiles('#file-input', path.join(TEST_DIR, 'text-code.png'));
       await waitResults(p);
-      assertEq(await p.locator('.result-card .result-meta').first().textContent(), '文本 · jsqr', 'meta 应标注 jsqr 引擎');
+      assertEq(await p.locator('.result-card .result-meta').first().textContent(), `${msg('text_label')} · jsqr`, 'meta 应标注 jsqr 引擎');
     } finally { await p.close().catch(() => {}); }
   });
 
@@ -810,7 +827,7 @@ async function suiteB(h, srv) {
     await goHome(page);
     await page.setInputFiles('#file-input', path.join(OUT_DIR, 'huge-over-budget.png'));
     await waitErr(page, 30000);
-    assertEq(await statusText(page), '未识别到二维码', '60MP 图应被预算拦下而非全图重扫');
+    assertEq(await statusText(page), msg('err_no_qr_title'), '60MP 图应被预算拦下而非全图重扫');
     assert(await page.locator('#btn-retry-crop').isVisible(), '应提供框选重试');
   });
 
@@ -915,13 +932,13 @@ async function suiteC(h, srv) {
     assertEq(await bodyMode(page), 'wide', '预览态应展开 760');
     assert(await page.locator('.crop-stage img').isVisible(), '截图预览图应显示');
     const hint = await page.locator('.crop-hint').textContent();
-    assert(hint.includes('拖拽框选'), '框选提示文案');
+    assertEq(hint, msg('crop_hint'), '框选提示文案');
   });
 
   await t('C3 全图识别（截图内容为 popup 自身，无码）→ 明确报错 + 可框选重试', async () => {
     await page.locator('.crop-actions button.ghost').click();
     await waitErr(page);
-    assertEq(await statusText(page), '未识别到二维码', 'popup 截图无码，应报未识别');
+    assertEq(await statusText(page), msg('err_no_qr_title'), 'popup 截图无码，应报未识别');
     assert(await page.locator('#btn-retry-crop').isVisible(), '应提供框选重试');
   });
 
@@ -941,7 +958,7 @@ async function suiteC(h, srv) {
     await sleep(120);
     await page.locator('.crop-actions button:not(.ghost)').click();
     await waitErr(page);
-    assertEq(await statusText(page), '未识别到二维码', '所选区域无码 → 明确报错');
+    assertEq(await statusText(page), msg('err_no_qr_title'), '所选区域无码 → 明确报错');
   });
 
   await t('C5 Esc 返回 home，宽度还原 400', async () => {
@@ -1080,23 +1097,28 @@ async function writeReport({ channel, captureProbe }) {
 // ---------------- 主流程 ----------------
 
 async function main() {
+  // 前置守门（I18N-PLAN grill Q3）：locale 完整性静态校验，失败即中止全部用例
+  const chk = spawnSync(process.execPath, [path.join(EXT_DIR, 'scripts', 'check-locales.mjs')], { stdio: 'inherit' });
+  if (chk.status !== 0) { console.error('check-locales 未通过，中止验收'); process.exit(1); }
+
   await makeAssets();
   const srv = await serveStatic(TEST_DIR);
   console.log(`静态服务器：${srv.url}`);
   let h;
   const captureProbe = [];
   try {
-    h = await launch({ channel: CHANNEL });
-    console.log(`扩展已加载：${h.extId}（channel=${CHANNEL}）`);
+    h = await launch({ channel: CHANNEL, lang: LANG });
+    console.log(`扩展已加载：${h.extId}（channel=${CHANNEL}，lang=${LANG}）`);
     if (ONLY.includes('A')) await suiteA(h, srv);
     if (ONLY.includes('B')) await suiteB(h, srv);
     if (ONLY.includes('C')) await suiteC(h, srv);
     if (ONLY.includes('D')) captureProbe.push(...(await suiteD(h, srv)) || []);
   } finally {
-    const summary = await writeReport({ channel: CHANNEL, captureProbe });
+    // 报告文件名带语言后缀，双语回归各自留档
+    const summary = await writeReport({ channel: `${CHANNEL}-${LANG}`, captureProbe });
     if (h) await h.close().catch(() => {});
     await srv.close().catch(() => {});
-    console.log(`\n==== ${CHANNEL} 汇总：${summary.pass} 通过 / ${summary.fail} 失败 ====`);
+    console.log(`\n==== ${CHANNEL}(${LANG}) 汇总：${summary.pass} 通过 / ${summary.fail} 失败 ====`);
     process.exit(summary.fail > 0 ? 2 : 0);
   }
 }

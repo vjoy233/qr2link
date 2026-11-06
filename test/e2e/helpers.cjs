@@ -28,7 +28,7 @@ const REPORT_DIR = __dirname;
 
 // ---------------- 浏览器启动 ----------------
 
-async function launch({ channel = 'chrome', headless = false } = {}) {
+async function launch({ channel = 'chrome', headless = false, lang } = {}) {
   // 目录名含 MARKER：oskeys.ps1 靠它在进程命令行中定位本自动化实例的主窗口，
   // 避免前台化用户自己开着的浏览器。
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), `qr2link-${channel}-QR2LINK-E2E-MARKER-`));
@@ -42,6 +42,8 @@ async function launch({ channel = 'chrome', headless = false } = {}) {
       '--no-first-run',
       '--no-default-browser-check',
       '--window-size=1360,900',
+      // i18n：锁定 UI 语言（缺省 zh-CN，与既有报告/断言一致；en-US 见 I18N-PLAN §4.8）
+      `--lang=${lang || uiLang()}`,
       // example.com → 本机 https（见 serveStatic），消除真实网络依赖与 DNS 黑洞
       '--host-resolver-rules=MAP example.com 127.0.0.2',
       '--ignore-certificate-errors',
@@ -185,10 +187,32 @@ function osSendKeys(channel, combo) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// ---------------- i18n 期望文案（与 launch 的 --lang 同源） ----------------
+
+/** 启动语言：QR2LINK_E2E_LANG（zh-CN | en-US），缺省 zh-CN（锁定既有断言语境） */
+function uiLang() { return process.env.QR2LINK_E2E_LANG || 'zh-CN'; }
+
+// 语言 → _locales 目录（Chrome 扩展目录命名用下划线；en 覆盖全部英文变体）
+const LANG_DIR = { 'zh-CN': 'zh_CN', 'en-US': 'en' };
+const localeCache = Object.create(null);
+
+/** 读 _locales/<dir>/messages.json 的 message 值，断言与 UI 实际文案同源（I18N-PLAN §4.8） */
+function msg(key, lang = uiLang()) {
+  const dir = LANG_DIR[lang];
+  if (!dir) throw new Error(`不支持的 QR2LINK_E2E_LANG=${lang}（可选：${Object.keys(LANG_DIR).join(' / ')}）`);
+  if (!localeCache[dir]) {
+    localeCache[dir] = JSON.parse(fs.readFileSync(path.join(EXT_DIR, '_locales', dir, 'messages.json'), 'utf8'));
+  }
+  const hit = localeCache[dir][key];
+  if (!hit || typeof hit.message !== 'string') throw new Error(`msg(${key}) 在 _locales/${dir} 不存在`);
+  return hit.message;
+}
+
 module.exports = {
   pw, EXT_DIR, TEST_DIR, REPORT_DIR,
   launch, openPopupTab, tryOpenRealPopup, serveStatic,
   setClipboard, osSendKeys, sleep,
+  uiLang, msg,
 };
 
 // ---------------- 附加工具 ----------------

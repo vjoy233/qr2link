@@ -32,7 +32,7 @@
 
   function $(id) { return document.getElementById(id); }
 
-  // ---------------- i18n 绑定（HTML 不留硬编码中文） ----------------
+  // ---------------- i18n 绑定（HTML 不留硬编码文案） ----------------
   function applyI18n() {
     var nodes = document.querySelectorAll('[data-i18n]');
     for (var i = 0; i < nodes.length; i++) {
@@ -40,6 +40,9 @@
       if (typeof T[key] === 'string') nodes[i].textContent = T[key];
     }
     document.title = T.appName;
+    // lang 跟随「实际命中的语言包」（locale_lang 为各语言包自描述值）：
+    // 比 getUILanguage() 更准——如 zh-TW UI 无 zh_TW 包时命中 default(en)，lang 应为 en
+    document.documentElement.lang = T.localeLang || 'en';
   }
 
   // ---------------- 视图切换（动态宽度：DESIGN §4.0） ----------------
@@ -103,8 +106,8 @@
       });
     }, function (err) {
       state.busy = false;
-      var key = err && err.message === 'IMAGE_FETCH_FAILED' ? 'errFetchImage' : 'errImageDecode';
-      showError(T[key], '', true);
+      // 直接引用字面量 key（T.errFetchImage / T.errImageDecode），落入 check-locales 引用闭包静态校验
+      showError(err && err.message === 'IMAGE_FETCH_FAILED' ? T.errFetchImage : T.errImageDecode, '', true);
     });
   }
 

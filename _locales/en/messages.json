@@ -1,0 +1,170 @@
+{
+  "app_name": {
+    "message": "QR2Link",
+    "description": "Brand name; identical in all locales"
+  },
+  "app_subtitle": {
+    "message": "QR code → link",
+    "description": "Header subtitle"
+  },
+  "btn_screenshot": {
+    "message": "Capture current page",
+    "description": "Home entry button: captures the visible area of the active tab"
+  },
+  "btn_screenshot_sub": {
+    "message": "Grab the visible area of the current tab",
+    "description": "Home entry button secondary line"
+  },
+  "btn_upload": {
+    "message": "Upload image",
+    "description": "Home entry button: pick a local image file"
+  },
+  "btn_upload_sub": {
+    "message": "Pick a local image file",
+    "description": "Home entry button secondary line"
+  },
+  "btn_clipboard": {
+    "message": "Read image from clipboard",
+    "description": "Home wide button: read clipboard image"
+  },
+  "input_hint": {
+    "message": "Paste with Ctrl+V · or drag an image into this window",
+    "description": "Hint line under the three entries"
+  },
+  "drop_here": {
+    "message": "Drop image to scan",
+    "description": "Drag-and-drop overlay text"
+  },
+  "crop_hint": {
+    "message": "Drag on the preview to select a QR area (optional — the full image is scanned by default)",
+    "description": "Preview/crop view hint"
+  },
+  "btn_scan_full": {
+    "message": "Scan full image",
+    "description": "Crop view action: scan the whole image"
+  },
+  "btn_scan_crop": {
+    "message": "Scan selection",
+    "description": "Crop view action: scan the selected rectangle"
+  },
+  "btn_back": {
+    "message": "Back",
+    "description": "Back to home from preview/results"
+  },
+  "decoding": {
+    "message": "Scanning…",
+    "description": "Spinner title while decoding"
+  },
+  "err_no_qr_title": {
+    "message": "No QR code found",
+    "description": "Error title when nothing was decoded"
+  },
+  "err_no_qr_hint": {
+    "message": "Try selecting the QR area, or use a clearer image",
+    "description": "Error hint suggesting crop retry or a better image"
+  },
+  "err_capture_title": {
+    "message": "Screenshot failed",
+    "description": "Error title when captureVisibleTab is rejected"
+  },
+  "err_capture_hint": {
+    "message": "This page may not allow screenshots. Take a system screenshot (e.g. Win+Shift+S), then paste or upload it",
+    "description": "Guidance when a page cannot be captured"
+  },
+  "err_clipboard_no_image": {
+    "message": "No image in the clipboard",
+    "description": "Error title when clipboard holds no image"
+  },
+  "err_clipboard_read": {
+    "message": "Clipboard read failed",
+    "description": "Error title when clipboard read() rejects"
+  },
+  "err_clipboard_read_hint": {
+    "message": "Click inside this popup first and retry, or just press Ctrl+V",
+    "description": "Guidance for clipboard permission failure"
+  },
+  "err_image_decode": {
+    "message": "Image could not be decoded",
+    "description": "Error title for undecodable images"
+  },
+  "err_fetch_image": {
+    "message": "Failed to fetch the image (possibly blocked by CORS or the network)",
+    "description": "Error title when a remote image fetch fails (context-menu flow)"
+  },
+  "btn_retry_crop": {
+    "message": "Retry with selection",
+    "description": "Error view button: re-enter crop with the same image"
+  },
+  "btn_open": {
+    "message": "Open",
+    "description": "Result card action: open http/https link in a new tab"
+  },
+  "btn_copy": {
+    "message": "Copy",
+    "description": "Result card action: copy text to clipboard"
+  },
+  "btn_keep": {
+    "message": "Keep",
+    "description": "Result card action: save to history (visible when history is on)"
+  },
+  "copied": {
+    "message": "Copied",
+    "description": "Button flash feedback after a successful copy"
+  },
+  "copy_failed": {
+    "message": "Copy failed",
+    "description": "Button flash feedback after a failed copy"
+  },
+  "kept": {
+    "message": "Kept",
+    "description": "Button flash feedback after keeping a result"
+  },
+  "text_label": {
+    "message": "Text",
+    "description": "Result meta label for non-URL payloads"
+  },
+  "history_title": {
+    "message": "Recent scans",
+    "description": "History panel title"
+  },
+  "history_off": {
+    "message": "History is off. Turn it on to keep scan results",
+    "description": "History panel placeholder when disabled"
+  },
+  "history_empty": {
+    "message": "No saved results yet",
+    "description": "History panel placeholder when empty"
+  },
+  "history_clear": {
+    "message": "Clear",
+    "description": "History panel: clear-all button (two-step confirm)"
+  },
+  "history_clear_confirm": {
+    "message": "Clear all?",
+    "description": "History panel: armed state of the two-step confirm"
+  },
+  "history_delete": {
+    "message": "Delete",
+    "description": "History row action: remove one entry"
+  },
+  "menu_scan_image": {
+    "message": "Scan QR code in image",
+    "description": "Context menu item on images"
+  },
+  "badge_fail": {
+    "message": "✕",
+    "description": "Toolbar badge on failure; symbol is locale-neutral"
+  },
+  "locale_lang": {
+    "message": "en",
+    "description": "Internal: BCP47 tag of the actually matched locale; used to set <html lang> (more accurate than getUILanguage when fallback hit)"
+  },
+  "manifest_description": {
+    "message": "Capture, upload, or paste an image to decode QR codes locally and open web links",
+    "description": "Extension description in manifest / store"
+  },
+  "command_scan_description": {
+    "message": "Capture the current page and scan it for QR codes",
+    "description": "Keyboard shortcut description on chrome://extensions/shortcuts"
+  }
+}
