@@ -449,3 +449,21 @@ zh_CN 列 = 现网文案原样搬运（零改动）；en 列已按 grill Q5 拍�
 review 其余事项：「已接受不阻塞」各项与 Q1–Q6 拍板一致；其 macOS 环境 `--lang` 不生效属平台差异（Windows 宿主实测 zh-CN/en-US/fr 三路均正确翻转，且 3×69 双语矩阵在本仓证据充分），无需处置。
 
 修复后验证：`check:locales` ✅ + `--self-test` 6/6 ✅ + e2e chromium×zh-CN **69/69** ✅（第 0 步同时实测新守门作为 run-all 前置）。
+
+### 发布包缺陷修复：zip 条目反斜杠分隔符（2026-11-06，用户报告引发）
+
+**现象**：用户反馈「英文界面按钮显示 btn_xxx」。全面排查（chromium/msedge × 仓库目录加载 / Windows 解压加载 / popup 页签，probe-en-ui.cjs 全量 dump + 截图）显示**英文 UI 实际渲染全部正确**——`data-i18n` 的 key（btnScreenshot 等）是内部标识符，按钮显示的是 messages.json 的文案。
+
+**真正的 bug 在发布包**：`pack-zip` 用的 Windows PowerShell 5.1 `Compress-Archive` 以 **`\`** 作为 zip 条目名分隔符（实测 36/36 条目违反 zip 规范 §4.4.17 的 `/` 要求）。后果：
+
+- **Chrome Web Store 直接拒收**（上传校验条目分隔符）；
+- **严格解压工具**（Info-ZIP unzip / macOS 归档工具 / 部分 Linux 工具）会把 `_locales\en\messages.json` 解成带反斜杠的扁平文件名或丢弃 → `_locales` 缺失 → `chrome.i18n.getMessage` 全部返回空 → UI 回落显示原始 key 名（`i18n.js` 的 `‖k` 兜底）——**即用户所见症状的来源路径**（Windows 自带解压宽容处理不受影响，故此前未被发现）。
+
+**修复与验证**（全部通过）：
+
+1. `pack-zip.mjs` 改用 .NET `ZipArchive` 显式以 `/` 建条目（兼容 PS 5.1，不用 .NET Core 的 GetRelativePath）；
+2. pack-zip 内置**打包后字节级自检**：扫描 local file header / central directory 名段，任何 `\` 即非零退出（防回归）；
+3. 重打包实测：0 个反斜杠条目；**Info-ZIP unzip 严格解压**目录树正确 → 从解压目录加载扩展 → 英文文案全部正确解析（probe-zipflow.cjs 端到端）；
+4. 新增 `test/e2e/probe-en-ui.cjs`（双语 UI 全表面探针 + 截图）与 `probe-zipflow.cjs`（发布包解压加载探针），作为发版前的例行验证项。
+
+**遗留提示**：`_locales` 缺失时 Chrome 直接拒绝加载（模拟实验中启动即挂起）——坏包的症状是「装不上」而非「显示 key」；用户若曾见 raw key 界面，更可能是从混合/异常目录加载所致，重载修复后目录即可。
