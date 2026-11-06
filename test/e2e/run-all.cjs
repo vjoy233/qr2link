@@ -424,6 +424,8 @@ async function suiteB(h, srv) {
     assertEq(await page.locator('#history-toggle').isChecked(), false, '历史开关默认关');
     assert(await page.locator('#history-clear').isHidden(), '清空按钮默认隐藏');
     assert((await page.locator('#history-list').textContent()).includes(msg('history_off')), '历史关闭提示');
+    // 拖拽覆盖层未拖拽时必须不可见（popup.css 的 display:flex 会压过 hidden 属性，回归锁定）
+    assert(await page.locator('#drop-overlay').isHidden(), '拖拽覆盖层默认隐藏');
   });
 
   await t('B2 上传 normal.png → URL 结果卡片 + 宽度切 760', async () => {

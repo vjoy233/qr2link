@@ -467,3 +467,12 @@ review 其余事项：「已接受不阻塞」各项与 Q1–Q6 拍板一致；�
 4. 新增 `test/e2e/probe-en-ui.cjs`（双语 UI 全表面探针 + 截图）与 `probe-zipflow.cjs`（发布包解压加载探针），作为发版前的例行验证项。
 
 **遗留提示**：`_locales` 缺失时 Chrome 直接拒绝加载（模拟实验中启动即挂起）——坏包的症状是「装不上」而非「显示 key」；用户若曾见 raw key 界面，更可能是从混合/异常目录加载所致，重载修复后目录即可。
+
+### 真实弹窗实测与附带修复（2026-11-06，computer use 全链路）
+
+应用户要求用 computer use 走真实用户路径验证：从修复后的 zip 解压目录加载扩展 → 真实点击工具栏拼图图标 → 扩展菜单 → QR2Link → **真实工具栏弹窗**，AX 树 dump + 桌面区域像素截图双重验证：
+
+- **英文文案全部正确**（Capture current page / Upload image / Read image from clipboard / Recent scans / History is off...），无任何 raw key——用户所见的 btn_xxx 与 zip 反斜杠缺陷（严格解压工具丢 `_locales` → getMessage 全空 → raw key 兜底）吻合，仓库目录与 Windows 解压路径不受影响；
+- **附带发现并修复一个 v1.0 起就存在的 UI bug**：`#drop-overlay` 因 `display:flex` 压过 `hidden` 属性而常驻可见（蓝色虚线框 + "Drop image to scan" 文字横穿弹窗）。补 `#drop-overlay[hidden]{display:none}` + B1 回归断言；
+- 技术备忘：Chromium 151 对扩展弹窗 target 的 CDP attach 会话禁用 Page/Runtime 域（仓库历史结论「真实 popup 无法 attach」的根因），像素验证改走「CUA 点击 + 桌面区域 CopyFromScreen 截图」；`shoot-real-popup.cjs` / `probe-en-ui.cjs` / `probe-zipflow.cjs` 留作发版例行探针；
+- 修复后回归：chromium×zh-CN 与 chromium×en-US 均 **69/69 通过**（B1 含新增覆盖层断言），新 zip 已重打包（87.7 KB，字节级自检通过）。截图存档：`test/e2e/report/real-popup-en-zip.png`（修复前）与 `real-popup-en-zip-fixed.png`（修复后）。
