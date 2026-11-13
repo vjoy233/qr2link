@@ -202,7 +202,11 @@
         body.className = 'result-body';
         var meta = document.createElement('div');
         meta.className = 'result-meta';
-        meta.textContent = r.isUrl ? 'URL' : (T.textLabel + ' · ' + r.engine);
+        var metaText = r.isUrl ? 'URL' : (T.textLabel + ' · ' + r.engine);
+        // 全码制（V1.2-PLAN PR-1）：非 QR 码制在 meta 前部展示 canonical 名（如 EAN13/Code128），
+        // QR 命中保持原展示不变（format 恒 'QRCode'，不追加）
+        if (r.format && r.format !== 'QRCode') metaText = r.format + ' · ' + metaText;
+        meta.textContent = metaText;
         var text = document.createElement('div');
         text.className = 'result-text';
         text.textContent = r.text; // trim 后原始文本（qr.js 已处理）
