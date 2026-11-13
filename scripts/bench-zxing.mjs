@@ -41,7 +41,7 @@ async function timeOnce(file) {
   return { ms: performance.now() - t0, hits: res.length };
 }
 
-async function bench(label, file, runs) {
+async function bench(label, file, runs, gate) {
   const times = [];
   let hits = -1;
   for (let i = 0; i < runs; i++) {
@@ -52,22 +52,28 @@ async function bench(label, file, runs) {
   }
   const max = Math.max(...times), min = Math.min(...times);
   const med = times.slice().sort((a, b) => a - b)[Math.floor(times.length / 2)];
-  const flag = max <= 5000 ? 'PASS' : 'FAIL';
-  console.log(`${label}  ->  中位 ${med.toFixed(0)}ms / 最大 ${max.toFixed(0)}ms（${runs - 1} 稳态轮，命中 ${hits}）${label.includes('50MP') ? `  [验收线 5000ms: ${flag}]` : ''}`);
-  return { label, med, max, hits };
+  let flag = '';
+  if (gate) flag = max <= gate.limit ? 'PASS' : 'FAIL';
+  else if (label.includes('50MP')) flag = 'INFO（预期出档：生产 stage2 已不使用 zxing 处理该尺寸）';
+  console.log(`${label}  ->  中位 ${med.toFixed(0)}ms / 最大 ${max.toFixed(0)}ms（${runs - 1} 稳态轮，命中 ${hits}）${flag ? `  [${flag}]` : ''}`);
+  const failed = !!(gate && max > gate.limit);
+  return { label, med, max, hits, failed };
 }
 
 console.log(`zxing-wasm ${ZXING_WASM_VERSION} 性能基准（参考机）\n`);
+// 门禁（PR #4 review P1-2b 采纳）：仅对「生产实际使用的 20MP 档」设阈值、违规非零退出；
+// 30/50MP 为预期出档（stage2 该尺寸走 jsQR），只作信息记录不阻断
+const GATE = { limit: 5000 };
 const cases = [
   { label: '320px 正常码 (normal.png)', file: join(ROOT, 'test', 'normal.png'), runs: 4 },
   await noisePng('bench-9mp-noise.png', 3000, 3000).then((c) => ({ label: `9MP ${c.label}`, file: c.file, runs: 3 })),
   { label: '40MP 大图小码 (huge-with-small.png 8000x5000)', file: join(ROOT, 'test', 'huge-with-small.png'), runs: 3 },
-  await noisePng('bench-20mp-noise.png', 5000, 4000).then((c) => ({ label: `20MP ${c.label}`, file: c.file, runs: 3 })),
+  await noisePng('bench-20mp-noise.png', 5000, 4000).then((c) => ({ label: `20MP ${c.label}`, file: c.file, runs: 3, gate: GATE })),
   await noisePng('bench-30mp-noise.png', 6000, 5000).then((c) => ({ label: `30MP ${c.label}`, file: c.file, runs: 3 })),
   await noisePng('bench-50mp-noise.png', 8333, 6000).then((c) => ({ label: `50MP ${c.label}`, file: c.file, runs: 3 })),
 ];
 const rows = [];
-for (const c of cases) rows.push(await bench(c.label, c.file, c.runs));
+for (const c of cases) rows.push(await bench(c.label, c.file, c.runs, c.gate));
 
 // ---- jsQR 基线（现网行为参照，直喂 RGBA，无 PNG 解码开销）----
 const { createRequire } = await import('node:module');
@@ -93,3 +99,7 @@ rows.push(await benchJsQr('50MP 无码噪声', join(OUT, 'bench-50mp-noise.png')
 
 writeFileSync(join(OUT, 'bench-result.json'), JSON.stringify({ version: ZXING_WASM_VERSION, date: new Date().toISOString(), rows }, null, 2));
 console.log('\n结果已写 test/out/bench/bench-result.json');
+if (rows.some((r) => r.failed)) {
+  console.error('\n生产档（20MP）超验收线，门禁失败');
+  process.exit(1);
+}

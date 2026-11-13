@@ -7,12 +7,14 @@
  *   decodeImage(source, opts)             三阶段解码，引擎按阶段分档（V1.2-PLAN PR-1，见下）
  *   getLastDecodeStats()                  最近一次 decodeImage 的阶段执行记录（测试/诊断探针，见下方说明）
  *
- * 引擎分档（zxing-wasm 引入后，V1.2-PLAN「zxing 性能基准」实测定档）：
- *   阶段 1（≤2000px 快扫）：native → zxing → 仍空时 jsQR（三引擎全跑兜回归面）
- *   阶段 2（全分辨率）：rect ≤ 20MP 走 native → zxing（jsQR 仅 zxingBroken 时参与）；
- *                      20–50MP 维持 native → jsQR（40MP 大图小码 B 用例锁定行为，零变化）
+ * 引擎分档（zxing-wasm 引入后，V1.2-PLAN「zxing 性能基准」实测定档；PR #4 review 采纳：
+ * native 命中后不再短路 zxing——native 仅 QR，短路会漏同图 1D/DataMatrix 码，改为合并去重）：
+ *   阶段 1（≤2000px 快扫）：native + zxing 合并（native 空也不影响 zxing）；仍无命中时 jsQR 兜底
+ *   阶段 2（全分辨率）：rect ≤ 20MP 走 native + zxing 合并（jsQR 仅 zxingBroken 时参与）；
+ *                      20–50MP 维持 native → 空时 jsQR（v1.1 行为零变化，40MP 大图小码 B 用例锁定）
  *   阶段 3（象限梯子）：native → jsQR 原样（issue #1 的 jsQR 多码救回机制；zxing 多码在 1/2 已覆盖）
- *   zxing 覆盖全码制（QR + 1D + DataMatrix/Aztec/PDF417），jsQR/native 仍仅 QR。
+ *   zxing 覆盖全码制（QR + 1D + DataMatrix/Aztec/PDF417），jsQR/native 仍仅 QR；
+ *   已知边界：>20MP 图上的混合码（QR+1D）在 native 命中 QR 时 1D 可能漏（该档刻意不走 zxing 控耗时）
  *
  * source: Blob | dataURL 字符串 | http(s) URL 字符串
  *   注意：URL 字符串的 fetch 在「调用方所在文档」执行——右键识别链路必须由 offscreen 调用。
@@ -240,8 +242,10 @@
       } catch (e) { /* 静默降级 */ }
     }
 
-    // ② zxing（全码制，多码原生）：仅当原生无结果时执行；wasm 懒加载（首次 decode 才实例化）
-    if (hits.length === 0 && engines.zxing && !zxingBroken && await initZxing()) {
+    // ② zxing（全码制，多码原生）：与 native 命中合并、不短路——native 仅 QR，短路会漏同图
+    // 1D/DataMatrix 码（PR #4 review P1：混合码图随浏览器不同丢结果）；重复文本由 decodeImage
+    // 统一去重（先 native 后 zxing，同文以 native 标签保留）。wasm 懒加载（首次 decode 才实例化）
+    if (engines.zxing && !zxingBroken && await initZxing()) {
       var zxHits = await zxingRead(imageData);
       for (var z = 0; z < zxHits.length; z++) hits.push(zxHits[z]);
     }
@@ -344,8 +348,9 @@
       // （v1.1 行为零变化——40MP 大图小码命中早退 1.2s，B 用例锁定）
       if (hits.length === 0 && rect.w * rect.h <= STAGE2_MAX_PIXELS) {
         var useZxingStage2 = rect.w * rect.h <= STAGE2_ZXING_MAX_PIXELS;
-        lastDecodeStats.stage2Engine = useZxingStage2 ? 'zxing' : 'jsqr';
         hits = await decodePass(loaded, rect, Infinity, { zxing: useZxingStage2, jsqr: !useZxingStage2 });
+        // stage2Engine 记录实际引擎：zxingBroken（含本趟内刚置位）时实际由 jsQR 兜底（PR #4 review P2-3）
+        lastDecodeStats.stage2Engine = (useZxingStage2 && !zxingBroken) ? 'zxing' : 'jsqr';
         lastDecodeStats.stages.push('2');
 
         // 阶段 3：仍无结果 → 象限分块重扫（issue #1 多码图）：1×2/2×1/2×2/4×4 逐块跑引擎序列，

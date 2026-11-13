@@ -1,9 +1,9 @@
 # QR2Link 验收实测记录（TEST-RESULTS）
 
-> **当前结论（迭代四·PR-1，2026-11-14，唯一有效口径）**
-> 方式：**Playwright 自动化验收**（`test/e2e/`，79 用例 = 69 存量 + 10 新增 E 组）+ zxing 性能基准（`scripts/bench-zxing.mjs`）
-> 对应：DESIGN.md §8 验证矩阵；V1.2-PLAN PR-1（zxing 引擎升级 + 全码制，见 §10）
-> 结论速览：**四轮全绿 79/79 ×4（Edge 156 / Playwright Chromium × zh-CN / en-US）**；新增锁定：全码制 11 种矩阵、阶段 1 三引擎 fallback、阶段 2 引擎分档（20MP）、离线零外联、浏览器 wasm 首实例化 ~15ms
+> **当前结论（迭代四·PR-1，2026-11-14，唯一有效口径；PR #4 AIbot review 处置后）**
+> 方式：**Playwright 自动化验收**（`test/e2e/`，84 用例 = 69 存量 + 15 新增 E 组）+ zxing 性能基准（`scripts/bench-zxing.mjs`，20MP 生产档退出码门禁）
+> 对应：DESIGN.md §8 验证矩阵；V1.2-PLAN PR-1（zxing 引擎升级 + 全码制，见 §10；review 处置见 §10.4）
+> 结论速览：**四轮全绿 84/84 ×4（Edge 156 / Playwright Chromium × zh-CN / en-US）**；新增锁定：全码制 11 种矩阵、native+zxing 合并去重（混合码）、fallback 四态（含初始化失败）、阶段 2 引擎分档（20MP）与探针真实值、离线冷启动零外联、offscreen 1D 链路、浏览器 wasm 首实例化 ~15ms
 >
 > 历史迭代：迭代一（54/54，§1–§7）、迭代二（62/62，§8）、迭代三（68/68，§9）仅作过程留痕，**用例计数以本节为准**。
 
@@ -244,3 +244,19 @@ Chrome 137+ 移除了命令行加载扩展能力，以下为品牌版 Chrome 手
 | 离线零外联（setOffline 解码成功 + performance entries 无 http(s)） | ✅ wasm 无 CDN 依赖 | E7 |
 | 存量引擎断言更新（A4/B5/B30–B32 jsqr→zxing）与 B11/B34/B36 梯级口径 | ✅ 全绿 | A/B 组 |
 | 既有契约不回归：最坏 9MP 链路 ≤15s（A15 实测 12.7–13.6s）、9MP/50MP 阈值（B37–B40）、超 50MP 框选重试（B33） | ✅ 全绿 | A15、B33–B40 |
+
+### 10.4 PR #4 AIbot review 处置（2026-11-14，全部采纳 9 项，无驳回；详见 V1.2-PLAN「PR #4 AIbot review 处置」）
+
+| Review 点 | 处置 | 证据 |
+|---|---|---|
+| P1-1 native 命中短路 zxing → 混合码漏结果 | **代码修复**：native+zxing 合并去重（不短路）；>20MP 混合码边界记入已接受限制 | E9（注入原生命中 + QR+Code128 混合图 → 双结果） |
+| P1-2a 20MP 无运行时硬上限 | 浏览器端全链路 <8s 门禁 + 已接受风险（wasm 单趟不可中断；v1.1 jsQR@9MP=29s 更差） | E10（实测 ~3.2s） |
+| P1-2b bench FAIL 仍退 0 | 20MP 生产档退出码门禁；50MP 改「预期出档」信息行 | `scripts/bench-zxing.mjs` |
+| P2-3 stage2Engine 记错值 | pass 完成后按实际引擎赋值（zxingBroken → jsqr） | E6b |
+| P2-4 初始化失败未覆盖 | prepareZXingModule 抛错注入：jsQR 接管、只初始化一次、不 reject | E5d |
+| P2-5 E7 非冷启动 / offscreen 无 1D | E7 改全新文档冷启动离线 + fetch/XHR 拦截断言 wasm 取自 chrome-extension://；E7b offscreen 1D 链路 | E7、E7b |
+| P2-6 vendor 校验非门禁 | `npm run check:vendor` + run-all 前置守门（verify 仅读 lib/ 不依赖 node_modules） | run-all step 0 |
+| P3-8 引擎描述不一致 | V1.2-PLAN 引擎分档段重写（阶段 3 为 native→jsQR） | V1.2-PLAN |
+| P3-9 许可证 EOF 空行 | 清理 | git diff --check 干净 |
+
+E 组 10 → 15（+E5d/E6b/E7b/E9/E10），全量 79 → 84，四轮全绿 84/84 ×4。

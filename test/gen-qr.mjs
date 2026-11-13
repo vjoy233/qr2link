@@ -116,4 +116,22 @@ if (failures.length) {
   console.log('码制矩阵完成: test/matrix/fmt-*.png x ' + MATRIX.length);
 }
 
+// 9. 混合码图（PR #4 review P1-1）：QR（native 可命中）+ Code128（仅 zxing 可读）同图，
+//    锁定「native 命中后不短路 zxing」的合并行为（E9）。画布宽按 Code128 实际宽度动态计算
+{
+  const qrBuf = await QRCode.toBuffer('https://example.com/qr2link-mixed', { width: 300, margin: 2 });
+  const c128 = path.join(matrixDir, 'fmt-code128.png');
+  const c128Meta = await sharp(c128).metadata();
+  const W = 40 + 300 + 60 + c128Meta.width + 40;
+  const H = 340;
+  await sharp({ create: { width: W, height: H, channels: 3, background: '#ffffff' } })
+    .composite([
+      { input: qrBuf, left: 40, top: Math.round((H - 300) / 2) },
+      { input: c128, left: 40 + 300 + 60, top: Math.round((H - c128Meta.height) / 2) },
+    ])
+    .png()
+    .toFile(path.join(matrixDir, 'mixed-qr-1d.png'));
+  console.log(`混合码图完成: test/matrix/mixed-qr-1d.png (${W}x${H})`);
+}
+
 console.log('done: test images generated in test/');

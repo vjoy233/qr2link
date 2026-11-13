@@ -1177,6 +1177,31 @@ async function suiteE(h) {
     } finally { await p.close().catch(() => {}); }
   });
 
+  await t('E5d fallback 锁定：zxing 初始化失败（prepareZXingModule 抛错）→ jsQR 接管、只尝试一次、不 reject（PR #4 review P2-4）', async () => {
+    const p = await newPopup(h);
+    try {
+      await p.evaluate(() => {
+        let calls = 0;
+        window.__zxingPrepareCalls = () => calls;
+        window.ZXingWASM.prepareZXingModule = function () { calls += 1; throw new Error('fake init failure'); };
+      });
+      const r = await p.evaluate(async (src) => {
+        const rs = await window.QR2Link.decodeImage(src);
+        return { results: rs, stats: window.QR2Link.getLastDecodeStats(), prepareCalls: window.__zxingPrepareCalls() };
+      }, fileDataUrl(path.join(TEST_DIR, 'normal.png')));
+      assertEq(r.results.length, 1, '初始化失败不应导致 reject，jsQR 应命中');
+      assertEq(r.results[0].engine, 'jsqr', '初始化失败由 jsQR 接管');
+      assertEq(r.stats.zxingBroken, true, 'zxingBroken 应置位');
+      assertEq(r.prepareCalls, 1, 'prepareZXingModule 只应被调用一次');
+      const r2 = await p.evaluate(async (src) => {
+        const rs = await window.QR2Link.decodeImage(src);
+        return { engine: rs[0].engine, prepareCalls: window.__zxingPrepareCalls() };
+      }, fileDataUrl(path.join(TEST_DIR, 'normal.png')));
+      assertEq(r2.engine, 'jsqr', '置位后短路走 jsQR');
+      assertEq(r2.prepareCalls, 1, '置位后不再重复初始化');
+    } finally { await p.close().catch(() => {}); }
+  });
+
   await t('E6 引擎分档边界：恰 20MP → stage2Engine=zxing；20MP+1px → jsqr（性能基准定档锁定）', async () => {
     const a = await decodeDirect(page, path.join(OUT_DIR, 'bnd-20mp.png'));
     assertEq(a.stats.stage2Engine, 'zxing', '恰 20MP 应走 zxing 档');
@@ -1186,16 +1211,62 @@ async function suiteE(h) {
     assert(b.stats.stages.includes('2'), '20MP+1px 仍执行阶段 2（≤50MP）');
   });
 
-  await t('E7 离线证明：setOffline 下解码成功 + 全程无 http(s) 资源请求（零网络承诺，wasm 随包加载）', async () => {
-    await page.context().setOffline(true);
+  await t('E6b 探针真实值：zxingBroken 后 20MP 阶段 2 记录 stage2Engine=jsqr 而非按像素档写 zxing（PR #4 review P2-3）', async () => {
+    const p = await newPopup(h);
     try {
-      const { results } = await decodeDirect(page, path.join(TEST_DIR, 'normal.png'));
-      assertEq(results.length, 1, '离线下仍应解码成功');
-      assertEq(results[0].text, 'https://example.com/qr2link-test', '离线解码文本');
-      const remote = await page.evaluate(() =>
+      await p.evaluate(() => { window.ZXingWASM.readBarcodes = async () => { throw new Error('fake zxing failure'); }; });
+      const stats = await p.evaluate(async (src) => {
+        await window.QR2Link.decodeImage(src);
+        return window.QR2Link.getLastDecodeStats();
+      }, fileDataUrl(path.join(OUT_DIR, 'bnd-20mp.png')));
+      assertEq(stats.zxingBroken, true, '应已置位');
+      assertEq(stats.stage2Engine, 'jsqr', '探针应记录实际引擎 jsqr');
+    } finally { await p.close().catch(() => {}); }
+  });
+
+  await t('E7 离线冷启动证明：全新文档先 setOffline 再首解码，wasm 取自扩展包且零外网请求（PR #4 review P2-5）', async () => {
+    const p = await newPopup(h);
+    try {
+      // 拦截 fetch/XHR 记录 wasm 加载来源（resource timing 不记 chrome-extension:// 资源，故用拦截）
+      await p.evaluate(() => {
+        window.__netLog = [];
+        const origFetch = window.fetch;
+        window.fetch = function (input, init) {
+          window.__netLog.push(String(input && input.url ? input.url : input));
+          return origFetch.apply(this, arguments);
+        };
+        const OrigXHR = window.XMLHttpRequest;
+        window.XMLHttpRequest = class extends OrigXHR {
+          open(method, url) { window.__netLog.push(String(url)); return super.open(...arguments); }
+        };
+      });
+      await p.context().setOffline(true);
+      const r = await p.evaluate(async (src) => {
+        const rs = await window.QR2Link.decodeImage(src);
+        return { results: rs, netLog: window.__netLog };
+      }, fileDataUrl(path.join(TEST_DIR, 'normal.png')));
+      assertEq(r.results.length, 1, '离线冷启动（首解码即离线）仍应成功');
+      assertEq(r.results[0].text, 'https://example.com/qr2link-test', '离线解码文本');
+      const wasmReq = r.netLog.filter((n) => n.includes('zxing_reader.wasm'));
+      assert(wasmReq.length >= 1, `wasm 应经 fetch/XHR 自扩展包加载，实际 ${JSON.stringify(r.netLog)}`);
+      assert(wasmReq.every((n) => n.startsWith('chrome-extension://')), `wasm 必须来自扩展包（locateFile 重写生效），实际 ${JSON.stringify(wasmReq)}`);
+      const remote = r.netLog.filter((n) => /^https?:\/\//.test(n));
+      assertEq(remote.length, 0, `不应有外网请求（含 jsDelivr），实际 ${JSON.stringify(remote)}`);
+      const perfRemote = await p.evaluate(() =>
         performance.getEntriesByType('resource').map((e) => e.name).filter((n) => /^https?:\/\//.test(n)));
-      assertEq(remote.length, 0, `不应有外网资源请求（含 jsDelivr），实际 ${JSON.stringify(remote)}`);
-    } finally { await page.context().setOffline(false); }
+      assertEq(perfRemote.length, 0, `performance entries 亦应零 http(s)，实际 ${JSON.stringify(perfRemote)}`);
+    } finally {
+      await p.context().setOffline(false);
+      await p.close().catch(() => {});
+    }
+  });
+
+  await t('E7b offscreen 链路 1D：code128 经 decodeInOffscreen → engine=zxing、format=Code128（快捷键/右键真实链路）', async () => {
+    const out = await h.sw.evaluate(async (src) => decodeInOffscreen({ kind: 'dataURL', value: src }), fileDataUrl(path.join(TEST_DIR, 'matrix', 'fmt-code128.png')));
+    assertEq(out.length, 1, '结果数');
+    assertEq(out[0].text, 'QR2LINK-CODE128', 'Code128 文本');
+    assertEq(out[0].format, 'Code128', 'format canonical 名');
+    assertEq(out[0].engine, 'zxing', 'offscreen 亦由 zxing 命中');
   });
 
   await t('E8 wasm 首次实例化：全新文档首解码（含实例化）应 < 10s（node 侧 ~49s 异常不得复现于浏览器）', async () => {
@@ -1208,6 +1279,47 @@ async function suiteE(h) {
       }, fileDataUrl(path.join(TEST_DIR, 'normal.png')));
       console.log(`        [obs] 首解码含 wasm 实例化耗时 ${ms.toFixed(0)}ms`);
       assert(ms < 10000, `浏览器首解码异常缓慢：${ms.toFixed(0)}ms（>10s）`);
+    } finally { await p.close().catch(() => {}); }
+  });
+
+  await t('E9 native 短路修复：原生命中 QR 后 zxing 仍执行 → 混合码图（QR+Code128）双结果（PR #4 review P1-1）', async () => {
+    const p = await newPopup(h);
+    try {
+      // 注入仅返回 QR 的原生引擎（模拟 native-capable 浏览器；zxing 未损坏，验证合并而非短路）
+      await p.evaluate(() => {
+        window.BarcodeDetector = class {
+          static async getSupportedFormats() { return ['qr_code']; }
+          constructor() {}
+          async detect() { return [{ rawValue: 'https://example.com/qr2link-mixed' }]; }
+        };
+      });
+      const { results, stats } = await p.evaluate(async (src) => {
+        const rs = await window.QR2Link.decodeImage(src);
+        return { results: rs, stats: window.QR2Link.getLastDecodeStats() };
+      }, fileDataUrl(path.join(TEST_DIR, 'matrix', 'mixed-qr-1d.png')));
+      assertEq(results.length, 2, 'native 命中 QR 不应短路 zxing，混合码应双结果');
+      const byText = {};
+      for (const r of results) byText[r.text] = r;
+      assert(byText['https://example.com/qr2link-mixed'], 'QR 结果应在（native 命中）');
+      assert(byText['QR2LINK-CODE128'], 'Code128 结果应在（zxing 补齐，native 读不了 1D）');
+      assertEq(byText['QR2LINK-CODE128'].engine, 'zxing', '1D 由 zxing 命中');
+      assertEq(byText['QR2LINK-CODE128'].format, 'Code128', 'format canonical 名');
+      assertEq(stats.stages.join(''), '1', '阶段 1 合并命中');
+    } finally { await p.close().catch(() => {}); }
+  });
+
+  await t('E10 20MP 生产档浏览器端耗时门禁：无码图全链路 < 8s 且走 zxing 档（慢设备回归早发现，PR #4 review P1-2）', async () => {
+    const p = await newPopup(h);
+    try {
+      const ms = await p.evaluate(async (src) => {
+        const t0 = performance.now();
+        await window.QR2Link.decodeImage(src);
+        return performance.now() - t0;
+      }, fileDataUrl(path.join(OUT_DIR, 'bnd-20mp.png')));
+      const stats = await p.evaluate(() => window.QR2Link.getLastDecodeStats());
+      console.log(`        [obs] 20MP 无码全链路 ${ms.toFixed(0)}ms（stages=${stats.stages.join('')}）`);
+      assertEq(stats.stage2Engine, 'zxing', '应走 zxing 档');
+      assert(ms < 8000, `20MP 无码链路异常缓慢：${ms.toFixed(0)}ms（>8s 门禁，阶段 2 预算受威胁）`);
     } finally { await p.close().catch(() => {}); }
   });
 
@@ -1254,6 +1366,10 @@ async function main() {
   // 前置守门（I18N-PLAN grill Q3）：locale 完整性静态校验，失败即中止全部用例
   const chk = spawnSync(process.execPath, [path.join(EXT_DIR, 'scripts', 'check-locales.mjs')], { stdio: 'inherit' });
   if (chk.status !== 0) { console.error('check-locales 未通过，中止验收'); process.exit(1); }
+
+  // 前置守门（PR #4 review P2-6 采纳）：vendor 文件 SHA256 校验（仅读 lib/，不依赖 node_modules）
+  const vchk = spawnSync(process.execPath, [path.join(EXT_DIR, 'scripts', 'vendor-sync.mjs')], { stdio: 'inherit' });
+  if (vchk.status !== 0) { console.error('vendor 校验未通过，中止验收'); process.exit(1); }
 
   await makeAssets();
   const srv = await serveStatic(TEST_DIR);
