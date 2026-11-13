@@ -1,11 +1,11 @@
 # QR2Link 验收实测记录（TEST-RESULTS）
 
-> **当前结论（迭代三，2026-11-05，唯一有效口径）**
-> 方式：**Playwright 自动化验收**（`test/e2e/`，68 用例）+ 环境差异探针
-> 对应：DESIGN.md §8 验证矩阵；本迭代为 PR #2 外部 review 处置回填（§9）
-> 结论速览：**Edge 156 全套件 68/68 全绿；Playwright Chromium 交叉验证 55/55（A/B）**；重扫墙钟预算（8s）与阶段选择边界（9MP / 50MP）均有回归用例锁定
+> **当前结论（迭代四·PR-1，2026-11-14，唯一有效口径）**
+> 方式：**Playwright 自动化验收**（`test/e2e/`，79 用例 = 69 存量 + 10 新增 E 组）+ zxing 性能基准（`scripts/bench-zxing.mjs`）
+> 对应：DESIGN.md §8 验证矩阵；V1.2-PLAN PR-1（zxing 引擎升级 + 全码制，见 §10）
+> 结论速览：**四轮全绿 79/79 ×4（Edge 156 / Playwright Chromium × zh-CN / en-US）**；新增锁定：全码制 11 种矩阵、阶段 1 三引擎 fallback、阶段 2 引擎分档（20MP）、离线零外联、浏览器 wasm 首实例化 ~15ms
 >
-> 历史迭代：迭代一（54/54 ×3 轮，§1–§7 原始记录）、迭代二（62/62，§8）仅作过程留痕，**用例计数以本节为准**；各迭代报告文件与提交对应关系见 §9.4。
+> 历史迭代：迭代一（54/54，§1–§7）、迭代二（62/62，§8）、迭代三（68/68，§9）仅作过程留痕，**用例计数以本节为准**。
 
 ---
 
@@ -208,3 +208,39 @@ Chrome 137+ 移除了命令行加载扩展能力，以下为品牌版 Chrome 手
 
 - 预算截停对「慢设备上大型合法多码图」的召回损失：截停时已扫部分照常返回，未扫趟次落「框选重试」——与 review 建议的分层执行一致，属有意取舍（DESIGN §9 风险表）。
 - 取图耗时 + 重扫预算的叠加边界（如 ~9s 慢取图成功后 + 8s 重扫 > 15s 消息超时 → badge ✕）：属 v1.4 既定 15s/10s 拆账下的已知极端组合，预算已将其从「无界」收窄为「至多超标一个截停超弛」，彻底解决需把绝对截止时刻穿透到 offscreen 消息协议，不随本版处理。
+
+## 10. 迭代四：zxing 引擎升级 + 全码制（V1.2-PLAN PR-1，2026-11-14）
+
+### 10.1 变更摘要
+
+- vendor zxing-wasm **3.1.6**（`lib/zxing-reader.js` 38KB IIFE + `lib/zxing_reader.wasm` 946KB；`scripts/vendor-sync.mjs` 全文件 SHA256 锁定 + 来源记录；THIRD_PARTY_LICENSES 补 zxing-wasm-MIT / zxing-cpp-Apache-2.0）
+- manifest 增 `content_security_policy.extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"`（Chromium 103+ 要求显式声明；wasm 随包本地加载，见 E7）
+- qr.js 引擎链分档：**阶段 1** native→zxing→（空）jsQR 三引擎全跑；**阶段 2** ≤20MP native→zxing、20–50MP 维持 native→jsQR（`STAGE2_ZXING_MAX_PIXELS=20MP`，按基准定档）；**阶段 3 梯子维持 jsQR 原样**（issue #1 多码救回机制）；结果对象加 `format` 字段（zxing canonical 名）；stats 探针加 `zxingBroken` / `stage2Engine`
+- 全码制（拍板⑧）：zxing formats 留空；popup 结果 meta 对非 QR 码制前缀展示码制名（如「EAN13 · …」）
+
+### 10.2 性能基准（`scripts/bench-zxing.mjs`，参考机，node 直调 wasm；结果存 `test/out/bench/bench-result.json`）
+
+| 场景 | zxing 稳态 | jsQR 基线（v1.1 行为） |
+|---|---|---|
+| 320px 正常码 | 7ms | — |
+| 9MP 无码噪声 | 1.65s | 29.0s（attemptBoth） |
+| 20MP 无码 | 3.7s | — |
+| 30MP 无码 | 6.0s ❌ | — |
+| 50MP 无码 | 11.7s ❌ | 分钟级（未完成） |
+| 40MP 大图小码 | 1.1s（命中早退） | 1.2s（命中早退） |
+
+- 验收线「50MP 无码 ≤5s」**不达标** → 启用 V1.2-PLAN 预案①：zxing 阶段 2 定档 20MP；20–50MP 维持 jsQR（行为零变化），无码最坏链路整体不劣于 v1.1
+- 浏览器侧 wasm 首实例化实测 **13–17ms**（node 侧 ~49s 为 node ESM/wasi 特性，不复现于浏览器；E8 用例锁定 <10s 门）
+
+### 10.3 实测结论（四轮全绿 79/79 ×4：msedge/chromium × zh-CN/en-US）
+
+| 项 | 结论 | 证据 |
+|---|---|---|
+| 全码制 11 种矩阵（QR/EAN13/UPCA/Code128/Code39/Code93/ITF/Codabar/DataMatrix/Aztec/PDF417）文本+format 锁定 | ✅ 逐一通过；**UPCA 按 zxing 语义记 EAN13 前置 0**（036000291452→0036000291452，数字等效） | E2 |
+| UI 展示码制名 | ✅ meta 前缀「EAN13 · …」 | E3 |
+| zxing 整图多码（不再依赖阶段 3 梯子） | ✅ two-codes / four-corners 均 stats.stages='1' | E4 |
+| fallback 三态：健康空结果→阶段 1 jsQR 救回 / 阶段 2 不回落 jsQR（防双引擎叠加）/ 运行期异常→zxingBroken 置位接管 | ✅ | E5 / E5b / E5c |
+| 阶段 2 引擎分档边界（恰 20MP ↔ 20MP+1px） | ✅ stage2Engine zxing ↔ jsqr | E6 |
+| 离线零外联（setOffline 解码成功 + performance entries 无 http(s)） | ✅ wasm 无 CDN 依赖 | E7 |
+| 存量引擎断言更新（A4/B5/B30–B32 jsqr→zxing）与 B11/B34/B36 梯级口径 | ✅ 全绿 | A/B 组 |
+| 既有契约不回归：最坏 9MP 链路 ≤15s（A15 实测 12.7–13.6s）、9MP/50MP 阈值（B37–B40）、超 50MP 框选重试（B33） | ✅ 全绿 | A15、B33–B40 |

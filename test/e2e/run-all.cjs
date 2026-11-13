@@ -2,13 +2,13 @@
  * run-all.cjs — QR2Link 自动化验收主套件（DESIGN §8 矩阵的可自动化子集）
  *
  * 用法：NODE_PATH="$(npm root -g)" node run-all.cjs <msedge|chromium|chrome> [suite]
- *   suite: A(SW链路) B(popup UI) C(截图主路径) D(手势/特殊页)，缺省全部
+ *   suite: A(SW链路) B(popup UI) C(截图主路径) D(手势/特殊页) E(zxing引擎/全码制)，缺省全部
  *   语言：QR2LINK_E2E_LANG=zh-CN（缺省）| en-US —— 同一套用例双语回归（I18N-PLAN §4.8），
  *         断言文案经 msg() 读 _locales，与启动 --lang 同源；报告文件名带语言后缀
  *
  * 环境前提（见 probe-load/probe-popup 结论）：
  *   - 品牌 Chrome 137+ 忽略 --load-extension → 用 msedge（同引擎）或 chromium 通道
- *   - Windows 桌面无 BarcodeDetector → jsQR 为实际引擎（断言按此）
+ *   - Windows 桌面无 BarcodeDetector → zxing 为主引擎、jsQR 为应急兜底（断言按此，V1.2-PLAN PR-1）
  *   - 真实 popup 无法被 Playwright attach 且 openPopup 不授予 activeTab
  *     → 截图主路径用「popup 标签页 + OS 注入 Alt+Shift+S 授予 activeTab」方案
  */
@@ -25,7 +25,7 @@ const {
 const OUT_DIR = path.join(TEST_DIR, 'out');
 const REPORT_DIR = path.join(__dirname, 'report');
 const CHANNEL = process.argv[2] || 'msedge';
-const ONLY = process.argv[3] || 'ABCD';
+const ONLY = process.argv[3] || 'ABCDE';
 const LANG = uiLang(); // 本轮启动语言（--lang 与断言 msg() 均以此为源）
 const OS_PROC = CHANNEL === 'msedge' ? 'msedge' : 'chrome';
 
@@ -132,6 +132,8 @@ function makeAssets() {
       [3000, 3001, 'bnd-9mp-plus.png'],   // 9MP+300px → 降采样档
       [8000, 6250, 'bnd-50mp.png'],       // 恰 50MP → 阶段 2/3 仍执行
       [8000, 6251, 'bnd-50mp-plus.png'],  // 50MP+8px → 阶段 2/3 跳过
+      [5000, 4000, 'bnd-20mp.png'],       // 恰 20MP → 阶段 2 zxing 档（V1.2-PLAN 性能基准定档）
+      [5000, 4001, 'bnd-20mp-plus.png'],  // 20MP+1px → 阶段 2 回落 jsQR 档
     ]) {
       await sharp({ create: { width: w, height: h, channels: 3, background: '#ffffff' } })
         .png({ compressionLevel: 9 })
@@ -242,7 +244,7 @@ async function suiteA(h, srv) {
     assert(ok, 'SW 中 I18N 常量不可用');
   });
 
-  await t('A2 引擎检测：Windows 无 BarcodeDetector → jsQR 兜底', async () => {
+  await t('A2 引擎检测：Windows 无 BarcodeDetector → zxing 引擎链接管', async () => {
     const env = await h.sw.evaluate(() => ({ hasBD: 'BarcodeDetector' in globalThis }));
     const popup = await newPopup(h);
     const canUse = await popup.evaluate(() => window.QR2Link.canUseNativeQr());
@@ -273,7 +275,7 @@ async function suiteA(h, srv) {
     assertEq(m.cmd, msg('command_scan_description'), '快捷键 description');
   });
 
-  await t('A4 offscreen 解码 dataURL（normal.png → URL，engine=jsqr）', async () => {
+  await t('A4 offscreen 解码 dataURL（normal.png → URL，engine=zxing）', async () => {
     const out = await h.sw.evaluate(async (src) => {
       // decodeInOffscreen 是 SW 顶层函数，可直接调用（比 handleScan 少了开页副作用）
       return await decodeInOffscreen({ kind: 'dataURL', value: src });
@@ -282,7 +284,7 @@ async function suiteA(h, srv) {
     assertEq(out[0].text, 'https://example.com/qr2link-test', '解码文本');
     assertEq(out[0].isUrl, true, 'isUrl');
     console.log(`        [obs] engine=${out[0].engine}`);
-    assertEq(out[0].engine, 'jsqr', '无原生引擎时应为 jsqr');
+    assertEq(out[0].engine, 'zxing', '无原生引擎时应为 zxing（阶段 1 快扫）');
   });
 
   await t('A5 handleScan 全链路：自动打开第一个链接', async () => {
@@ -464,7 +466,7 @@ async function suiteB(h, srv) {
     const meta = await page.locator('.result-card .result-meta').first().textContent();
     const text = await page.locator('.result-card .result-text').first().textContent();
     assertEq(text, 'WIFI:T:WPA;S:ssid;P:pass;;', '结果文本');
-    assert(meta.startsWith(msg('text_label')) && meta.includes('jsqr'), `meta 应为「${msg('text_label')} · jsqr」，实际 ${meta}`);
+    assert(meta.startsWith(msg('text_label')) && meta.includes('zxing'), `meta 应为「${msg('text_label')} · zxing」，实际 ${meta}`);
     const btns = await page.locator('.result-card .mini-btn').allTextContents();
     assert(!btns.includes(msg('btn_open')), '非 URL 不应有打开按钮');
     assert(btns.includes(msg('btn_copy')), '应有复制按钮');
@@ -511,7 +513,7 @@ async function suiteB(h, srv) {
     assert(btns.includes(msg('btn_open')), 'trim 后应识别为 URL');
   });
 
-  await t('B11 双码图上传 → 阶段 3 分块救回：两张结果卡片（issue #1 主场景）', async () => {
+  await t('B11 双码图上传 → 两张结果卡片（issue #1 主场景；zxing 阶段 1 整图多码，jsQR 应急时由阶段 3 梯子救回）', async () => {
     await goHome(page);
     await page.setInputFiles('#file-input', path.join(TEST_DIR, 'two-codes.png'));
     await waitResults(page);
@@ -755,7 +757,7 @@ async function suiteB(h, srv) {
   });
 
   // ---- 验收 review #7：BarcodeDetector 原生路径（本环境无原生引擎，注入 Fake 覆盖四条分支） ----
-  // qr.js 能力检测按页面会话缓存，原生引擎无结果时兜底 jsQR ——
+  // qr.js 能力检测按页面会话缓存，原生引擎无结果时走 zxing→jsQR 引擎链 ——
   // 故每个用例须用全新 popup 页，注入 Fake 后、任何解码发生前完成。
 
   /** 注入 FakeBarcodeDetector；formats 决定能力检测，detect 决定 detect() 行为 */
@@ -791,7 +793,7 @@ async function suiteB(h, srv) {
     } finally { await p.close().catch(() => {}); }
   });
 
-  await t('B30 原生 detect 抛异常 → 静默降级 jsQR 识别成功', async () => {
+  await t('B30 原生 detect 抛异常 → 静默降级 zxing 识别成功', async () => {
     const p = await newPopup(h);
     try {
       await injectFakeDetector(p, { formats: ['qr_code'], detect: 'throw' });
@@ -801,7 +803,7 @@ async function suiteB(h, srv) {
     } finally { await p.close().catch(() => {}); }
   });
 
-  await t('B31 getSupportedFormats 不含 qr_code → canUseNativeQr=false 走 jsQR', async () => {
+  await t('B31 getSupportedFormats 不含 qr_code → canUseNativeQr=false 走 zxing', async () => {
     const p = await newPopup(h);
     try {
       await injectFakeDetector(p, { formats: ['text'], detect: 'two' });
@@ -809,11 +811,11 @@ async function suiteB(h, srv) {
       assertEq(canUse, false, '不含 qr_code 应判不可用');
       await p.setInputFiles('#file-input', path.join(TEST_DIR, 'text-code.png'));
       await waitResults(p);
-      assertEq(await p.locator('.result-card .result-meta').first().textContent(), `${msg('text_label')} · jsqr`, 'meta 应标注 jsqr 引擎');
+      assertEq(await p.locator('.result-card .result-meta').first().textContent(), `${msg('text_label')} · zxing`, 'meta 应标注 zxing 引擎');
     } finally { await p.close().catch(() => {}); }
   });
 
-  await t('B32 原生 detect 返回空 → 兜底 jsQR 识别成功', async () => {
+  await t('B32 原生 detect 返回空 → 兜底 zxing 识别成功', async () => {
     const p = await newPopup(h);
     try {
       await injectFakeDetector(p, { formats: ['qr_code'], detect: 'empty' });
@@ -831,7 +833,7 @@ async function suiteB(h, srv) {
     assert(await page.locator('#btn-retry-crop').isVisible(), '应提供框选重试');
   });
 
-  await t('B34 四角四码上传 → 阶段 3 的 2×2 梯级：四张结果卡片（issue #1）', async () => {
+  await t('B34 四角四码上传 → 四张结果卡片（issue #1；zxing 阶段 1 整图多码，2×2 梯级为 jsQR 应急路径）', async () => {
     await goHome(page);
     await page.setInputFiles('#file-input', path.join(OUT_DIR, 'four-corners.png'));
     await waitResults(page);
@@ -851,7 +853,7 @@ async function suiteB(h, srv) {
     assertEq(texts[0], 'https://example.com/qr2link-twin', '文本');
   });
 
-  await t('B36 上下堆叠双码上传 → 阶段 3 的 1×2 梯级：两张结果卡片（issue #1；review #2 P2 补可重复断言）', async () => {
+  await t('B36 上下堆叠双码上传 → 两张结果卡片（issue #1；review #2 P2 补可重复断言；1×2 梯级为 jsQR 应急路径）', async () => {
     await goHome(page);
     await page.setInputFiles('#file-input', path.join(OUT_DIR, 'stacked-tall.png'));
     await waitResults(page);
@@ -985,7 +987,8 @@ async function suiteD(h, srv) {
     await sleep(600);
     osSendKeys(OS_PROC, 'Alt+Shift+S');
     // 等自动开页（截图→创建 offscreen→解码→tabs.create）。
-    // 注意：测试页有 7 个码，jsQR 只回一个——开哪个 example.com/qr2link-* 都算全链路成功
+    // 注意：测试页有 7 个码，zxing 整图多码后 openFirstLink 取首个 http/hs 结果——
+    // 开哪个 example.com/qr2link-* 都算全链路成功
     const opened = await waitTabByUrl(h, 'example.com/qr2link-', 15000);
     if (!opened) {
       const badge = await badgeText(h);
@@ -995,7 +998,7 @@ async function suiteD(h, srv) {
       const ts = await chrome.tabs.query({});
       return ts.map((t) => t.url || t.pendingUrl || '').filter((u) => u.includes('example.com'));
     });
-    console.log(`        [obs] 自动开页成功: ${JSON.stringify(obsTabs)}（jsQR 单码引擎，7 码页任选其一）`);
+    console.log(`        [obs] 自动开页成功: ${JSON.stringify(obsTabs)}（zxing 多码引擎取首个结果）`);
     await opened.close().catch(() => {});
     await testPage.close().catch(() => {});
   });
@@ -1060,6 +1063,157 @@ async function suiteD(h, srv) {
   return captureProbe;
 }
 
+// ================= Suite E：zxing 引擎链与全码制（V1.2-PLAN PR-1） =================
+
+async function suiteE(h) {
+  currentGroup = 'E-ZXING';
+  console.log('\n== E-ZXING: zxing 引擎链 / 全码制矩阵 / 离线证明 / 引擎分档边界 ==');
+  const page = await newPopup(h);
+  page.on('pageerror', (e) => pageErrors.push({ url: page.url(), err: String(e) }));
+
+  const decodeDirect = (pg, file) => pg.evaluate(async (src) => {
+    const results = await window.QR2Link.decodeImage(src);
+    return { results, stats: window.QR2Link.getLastDecodeStats() };
+  }, fileDataUrl(file));
+
+  await t('E1 阶段 1 快扫命中：normal.png → engine=zxing、format=QRCode、stats 仅阶段 1', async () => {
+    const { results, stats } = await decodeDirect(page, path.join(TEST_DIR, 'normal.png'));
+    assertEq(results.length, 1, '结果数');
+    assertEq(results[0].text, 'https://example.com/qr2link-test', '解码文本');
+    assertEq(results[0].engine, 'zxing', '桌面无原生环境应由 zxing 命中');
+    assertEq(results[0].format, 'QRCode', 'format canonical 名');
+    assertEq(stats.stages.join(''), '1', '阶段 1 即命中');
+    assertEq(stats.zxingBroken, false, 'zxing 应健康');
+    assertEq(stats.stage2Engine, null, '未进阶段 2');
+  });
+
+  await t('E2 全码制矩阵 11 种：文本 + format canonical 名逐一锁定（拍板⑧；UPCA 按 zxing 语义记 EAN13 前置 0）', async () => {
+    const EXPECT = [
+      ['qrcode', 'https://example.com/qr2link-matrix-qr', 'QRCode'],
+      ['ean13', '5901234123457', 'EAN13'],
+      ['upca', '0036000291452', 'EAN13'],
+      ['code128', 'QR2LINK-CODE128', 'Code128'],
+      ['code39', 'QR2LINK-39', 'Code39'],
+      ['code93', 'QR2LINK-93', 'Code93'],
+      ['itf', '1234567890', 'ITF'],
+      ['codabar', 'A123456A', 'Codabar'],
+      ['datamatrix', 'https://example.com/qr2link-matrix-dm', 'DataMatrix'],
+      ['aztec', 'https://example.com/qr2link-matrix-aztec', 'Aztec'],
+      ['pdf417', 'https://example.com/qr2link-matrix-pdf417', 'PDF417'],
+    ];
+    for (const [file, text, format] of EXPECT) {
+      const { results } = await decodeDirect(page, path.join(TEST_DIR, 'matrix', `fmt-${file}.png`));
+      assertEq(results.length, 1, `${file} 结果数`);
+      assertEq(results[0].text, text, `${file} 解码文本`);
+      assertEq(results[0].format, format, `${file} format canonical 名`);
+      assertEq(results[0].engine, 'zxing', `${file} engine`);
+    }
+  });
+
+  await t('E3 UI：ean13 上传 → 结果 meta 前缀展示码制名「EAN13 · …」（A2 全码制 UI）', async () => {
+    await goHome(page);
+    await page.setInputFiles('#file-input', path.join(TEST_DIR, 'matrix', 'fmt-ean13.png'));
+    await waitResults(page);
+    const meta = await page.locator('.result-card .result-meta').first().textContent();
+    assert(meta.startsWith('EAN13 · '), `meta 应以「EAN13 · 」前缀展示码制名，实际 ${meta}`);
+    assertEq(await page.locator('.result-card .result-text').first().textContent(), '5901234123457', 'EAN13 文本');
+  });
+
+  await t('E4 zxing 整图多码：two-codes / four-corners 均在阶段 1 命中多卡（不再依赖阶段 3 梯子）', async () => {
+    const two = await decodeDirect(page, path.join(TEST_DIR, 'two-codes.png'));
+    assertEq(two.results.length, 2, 'two-codes 应 2 结果');
+    assertEq(two.stats.stages.join(''), '1', 'two-codes 应阶段 1 整图多码');
+    const four = await decodeDirect(page, path.join(OUT_DIR, 'four-corners.png'));
+    assertEq(four.results.length, 4, 'four-corners 应 4 结果');
+    assertEq(four.stats.stages.join(''), '1', 'four-corners 应阶段 1 整图多码');
+  });
+
+  await t('E5 fallback 锁定：zxing 健康但空结果 → 阶段 1 由 jsQR 救回（review 修订版）', async () => {
+    // 与 B29-32 同法：覆盖注入须发生在任何解码之前 → 全新 popup 页（引擎状态按文档隔离）
+    const p = await newPopup(h);
+    try {
+      await p.evaluate(() => {
+        // 让 zxing「健康但空结果」：readBarcodes 恒返 []（不 throw、不置 zxingBroken）
+        window.ZXingWASM.readBarcodes = async () => [];
+      });
+      const { results, stats } = await p.evaluate(async (src) => {
+        const rs = await window.QR2Link.decodeImage(src);
+        return { results: rs, stats: window.QR2Link.getLastDecodeStats() };
+      }, fileDataUrl(path.join(TEST_DIR, 'inverted.png')));
+      assertEq(results.length, 1, 'jsQR 应救回反色码');
+      assertEq(results[0].text, 'https://example.com/qr2link-inverted', '救回文本');
+      assertEq(results[0].engine, 'jsqr', '空结果时阶段 1 应兜 jsQR');
+      assertEq(stats.zxingBroken, false, '空返回不算损坏');
+      assertEq(stats.stages.join(''), '1', '阶段 1 即救回');
+    } finally { await p.close().catch(() => {}); }
+  });
+
+  await t('E5b fallback 锁定：zxing 健康空结果时阶段 2 不回落 jsQR（大图双引擎叠加防护）', async () => {
+    const p = await newPopup(h);
+    try {
+      await p.evaluate(() => { window.ZXingWASM.readBarcodes = async () => []; });
+      const stats = await p.evaluate(async (src) => {
+        await window.QR2Link.decodeImage(src);
+        return window.QR2Link.getLastDecodeStats();
+      }, fileDataUrl(path.join(OUT_DIR, 'bnd-9mp.png')));
+      assertEq(stats.stage2Engine, 'zxing', '9MP 应记 zxing 档');
+      assertEq(stats.zxingBroken, false, '空返回不置损坏');
+      assert(stats.stages.includes('3'), '阶段 3 梯子仍执行（jsQR 逐块）');
+    } finally { await p.close().catch(() => {}); }
+  });
+
+  await t('E5c fallback 锁定：zxing 运行期异常 → zxingBroken 置位，jsQR 全程接管', async () => {
+    const p = await newPopup(h);
+    try {
+      await p.evaluate(() => { window.ZXingWASM.readBarcodes = async () => { throw new Error('fake zxing failure'); }; });
+      const r = await p.evaluate(async (src) => {
+        const rs = await window.QR2Link.decodeImage(src);
+        return { results: rs, stats: window.QR2Link.getLastDecodeStats() };
+      }, fileDataUrl(path.join(TEST_DIR, 'normal.png')));
+      assertEq(r.results[0].engine, 'jsqr', 'zxing 异常后应由 jsQR 接管');
+      assertEq(r.stats.zxingBroken, true, 'zxingBroken 应置位');
+      const r2 = await p.evaluate(async (src) => (await window.QR2Link.decodeImage(src))[0], fileDataUrl(path.join(TEST_DIR, 'normal.png')));
+      assertEq(r2.engine, 'jsqr', '置位后同文档后续解码短路走 jsQR');
+    } finally { await p.close().catch(() => {}); }
+  });
+
+  await t('E6 引擎分档边界：恰 20MP → stage2Engine=zxing；20MP+1px → jsqr（性能基准定档锁定）', async () => {
+    const a = await decodeDirect(page, path.join(OUT_DIR, 'bnd-20mp.png'));
+    assertEq(a.stats.stage2Engine, 'zxing', '恰 20MP 应走 zxing 档');
+    assert(a.stats.stages.includes('2'), '20MP 应执行阶段 2');
+    const b = await decodeDirect(page, path.join(OUT_DIR, 'bnd-20mp-plus.png'));
+    assertEq(b.stats.stage2Engine, 'jsqr', '20MP+1px 应回落 jsQR 档');
+    assert(b.stats.stages.includes('2'), '20MP+1px 仍执行阶段 2（≤50MP）');
+  });
+
+  await t('E7 离线证明：setOffline 下解码成功 + 全程无 http(s) 资源请求（零网络承诺，wasm 随包加载）', async () => {
+    await page.context().setOffline(true);
+    try {
+      const { results } = await decodeDirect(page, path.join(TEST_DIR, 'normal.png'));
+      assertEq(results.length, 1, '离线下仍应解码成功');
+      assertEq(results[0].text, 'https://example.com/qr2link-test', '离线解码文本');
+      const remote = await page.evaluate(() =>
+        performance.getEntriesByType('resource').map((e) => e.name).filter((n) => /^https?:\/\//.test(n)));
+      assertEq(remote.length, 0, `不应有外网资源请求（含 jsDelivr），实际 ${JSON.stringify(remote)}`);
+    } finally { await page.context().setOffline(false); }
+  });
+
+  await t('E8 wasm 首次实例化：全新文档首解码（含实例化）应 < 10s（node 侧 ~49s 异常不得复现于浏览器）', async () => {
+    const p = await newPopup(h);
+    try {
+      const ms = await p.evaluate(async (src) => {
+        const t0 = performance.now();
+        await window.QR2Link.decodeImage(src);
+        return performance.now() - t0;
+      }, fileDataUrl(path.join(TEST_DIR, 'normal.png')));
+      console.log(`        [obs] 首解码含 wasm 实例化耗时 ${ms.toFixed(0)}ms`);
+      assert(ms < 10000, `浏览器首解码异常缓慢：${ms.toFixed(0)}ms（>10s）`);
+    } finally { await p.close().catch(() => {}); }
+  });
+
+  await page.close().catch(() => {});
+}
+
 // ================= 汇总 =================
 
 async function writeReport({ channel, captureProbe }) {
@@ -1113,6 +1267,7 @@ async function main() {
     if (ONLY.includes('B')) await suiteB(h, srv);
     if (ONLY.includes('C')) await suiteC(h, srv);
     if (ONLY.includes('D')) captureProbe.push(...(await suiteD(h, srv)) || []);
+    if (ONLY.includes('E')) await suiteE(h);
   } finally {
     // 报告文件名带语言后缀，双语回归各自留档
     const summary = await writeReport({ channel: `${CHANNEL}-${LANG}`, captureProbe });
