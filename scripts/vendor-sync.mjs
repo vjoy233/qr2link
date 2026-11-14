@@ -33,6 +33,12 @@ const VENDOR_LOCK = {
     source: 'zxing-wasm/dist/reader/zxing_reader.wasm',
     sha256: '5003fb4b88c4fbd1fd518a2fd8c8ad365c519e183a08c03a322dddfea3cea84e',
   },
+  // 生成视图（V1.2-PLAN PR-3）：UMD 单文件自包含（内嵌 qrcode-generator@1.4+，全局 QRCodeStyling）
+  'lib/qr-code-styling.js': {
+    from: 'qr-code-styling@1.9.2 (lib/qr-code-styling.js, UMD 自包含)',
+    source: 'qr-code-styling/lib/qr-code-styling.js',
+    sha256: '429de523c7563fc0647e618f5a8ea567d5a16412a13ef5d6a082b4502f5a54f9',
+  },
 };
 
 const sha256 = (f) => createHash('sha256').update(readFileSync(f)).digest('hex');
