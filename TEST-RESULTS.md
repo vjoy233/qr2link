@@ -1,9 +1,9 @@
 # QR2Link 验收实测记录（TEST-RESULTS）
 
-> **当前结论（迭代四·PR-2，2026-11-14，唯一有效口径）**
-> 方式：**Playwright 自动化验收**（`test/e2e/`，108 用例 = 84 存量 + 24 新增 F/G 组）
-> 对应：DESIGN.md §8 验证矩阵；V1.2-PLAN PR-2（C1 结构化解析 + C2 安全预检，见 §10.5；PR-1 见 §10.1–10.4）
-> 结论速览：**四轮全绿 108/108 ×4（Edge 156 / Playwright Chromium × zh-CN / en-US）**；新增锁定：WIFI/otpauth/vCard/tel/sms/mailto/geo 解析正负矩阵、TOTP RFC 6238 官方向量 ×12（SHA1/256/512）、倒计时与视图切换清理、安全分级/reasons 排序、danger 两段式确认、快捷键 danger 照开（拍板③）+ SW 无 Safety 全局
+> **当前结论（迭代四·PR-2，2026-11-14，唯一有效口径；PR #5 AIbot review 处置后）**
+> 方式：**Playwright 自动化验收**（`test/e2e/`，115 用例 = 84 存量 + 31 新增 F/G 组，含 review 采纳 +7）
+> 对应：DESIGN.md §8 验证矩阵；V1.2-PLAN PR-2（C1 结构化解析 + C2 安全预检，见 §10.5；review 处置见 §10.6；PR-1 见 §10.1–10.4）
+> 结论速览：**四轮全绿 115/115 ×4（Edge 156 / Playwright Chromium × zh-CN / en-US）**；新增锁定：WIFI/otpauth/vCard/tel/sms/mailto/geo 解析正负矩阵、TOTP RFC 6238 官方向量 ×12（SHA1/256/512）、倒计时与视图切换清理、安全分级/reasons 排序、danger 两段式确认、快捷键 danger 照开（拍板③）+ SW 无 Safety 全局、maskSecrets 抗编码参数名绕过、Base32 canonical、userPass 宽口径（仅用户名同样 danger）
 >
 > 历史迭代：迭代一（54/54，§1–§7）、迭代二（62/62，§8）、迭代三（68/68，§9）仅作过程留痕，**用例计数以本节为准**。
 
@@ -305,3 +305,21 @@ E 组 10 → 15（+E5d/E6b/E7b/E9/E10），全量 79 → 84，四轮全绿 84/84
 - 纯西里尔仿冒词（如 `xn--80ak6aa92e` = аррӏе）按方案口径不触发混排规则——「看起来像拉丁」检测需 confusables 表，超范围；G2 已锁定该边界为已知限制
 
 F/G 组 24 用例（F1–F17 含 F9b / G1–G6），全量 84 → 108，四轮全绿 108/108 ×4。
+
+### 10.6 PR #5 AIbot review 处置（2026-11-14，全部采纳 11 项：P1×1 + P2×9 + P3×1；详见 V1.2-PLAN 措辞同步与各文件内注释）
+
+| Review 点 | 处置 | 证据 |
+|---|---|---|
+| P1 maskSecrets 可被 `%73ecret` 编码参数名绕过、重复 secret 只遮首项 | **重写为 URL 解析重建**：参数名按解码后形态匹配（与 parseOtpauth 的 URLSearchParams 语义同源），重复 secret 逐项全遮蔽；畸形 otpauth 原样返回（parse 亦不命中，无打码面）；重建仅用于显示，存储/复制仍原文 | F18 |
+| P2 vCard 结束标记按全文搜索、非结构行静默跳过 | 记录级校验：END:VCARD 须为独立记录行（值里伪造不算）、结束后仅允许空行、无冒号非结构行拒绝（与「绝不半解析」一致） | F19 |
+| P2 otpauth 忽略 query `issuer` | query issuer 优先、缺省回落 label 前段（Google Key URI 规范；冲突时 query 赢，契约锁定） | F20 |
+| P2 重复 query 参数与「后值覆盖」契约不一致（`URLSearchParams.get` 取首值） | 显式 `lastParam()` 迭代取末值，otpauth 全参数 + mailto subject/body + sms body 统一；文件头注释修正 | F20 |
+| P2 vCard 两段 replace 反转义把字面量「反斜杠+n」误变两次 | 单趟左到右扫描反转义（`\\` `\n` `\;` `\,`） | F19 |
+| P2 geo 第三段不校验、坐标未受长度上限约束 | 至多三段（lat,lon[,alt]）；alt 存在即须合法数值；每段 ≤256 | F22 |
+| P2 Base32 未校验填充数与未用尾位（GE= / GE======= / GF 可通过） | canonical 全量校验：填充数恰为期望值、body 对齐 8 时禁填充、未用尾位必须为 0 | F21 |
+| P2 tel 允许无数字号码（`tel:+`） | 最小语法：`+` 仅首位 0–1 次、必须含数字、总长 ≤64 | F22 |
+| P2 userPass 规则比「user:pass@」更宽（`user@host` 也标 danger） | **保留宽口径**（review 给出的两个正解之一）：仅用户名形态正是 `https://example.com@evil.com/` 类仿冒，收窄会放过该手法；同步 V1.2-PLAN 措辞、i18n 文案（「内嵌登录信息」）与注释 | G7 |
+| P2 README 未含快捷键安全边界说明 | 按方案 README 改写整体推迟 PR-4（V1.2-PLAN PR-4 收尾清单已有该项）；**修正 background.js 注释**——原表述「README 已明示」不实，改为「由 PR-4 统一补写，当前尚未包含」 | background.js |
+| P3 generateTotp/totpRemaining 未复用参数约束 | generateTotp 对 digits/period 非法值 reject（不静默吞默认）；totpRemaining 非法 period 按 30 兜底（显示函数不产 NaN） | F23 |
+
+review 采纳 +7 用例（F18–F23 / G7），F/G 24 → 31，全量 108 → 115，四轮全绿 115/115 ×4。

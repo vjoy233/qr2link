@@ -7,7 +7,8 @@
  * 规则枚举（数组序 = reasons 输出序；danger 类恒先于 caution 类，e2e G1 锁定排序）：
  *   danger idnHomograph  xn-- 标签 punycode 解码（内嵌 RFC 3492 解码器）后混排
  *                        拉丁/西里尔/希腊字母 ≥2 种文字（同形仿冒）；解码失败静默跳过
- *   danger userPass      URL 内嵌 user:pass@ 凭据
+ *   danger userPass      URL 带 userinfo 登录信息（user[:pass]@，含仅用户名形态——覆盖
+ *                        https://example.com@evil.com/ 类仿冒；PR #5 review 采纳的宽口径）
  *   caution httpPlain    http: 明文连接
  *   caution ipHost       IP 字面量主机（IPv4 / [IPv6] 含 IPv4-mapped、私网/回环段在内，
  *                        统一归单一原因「内网或本机地址」——外部 review P2 拍板，
@@ -136,6 +137,9 @@
 
   // ---------------- 主入口 ----------------
   // 规则数组序即 reasons 输出序：danger 类在前、caution 类在后（排序契约由数组保证）
+  // userPass 为「任何 userinfo」宽口径（PR #5 review P2 采纳·保留实现原行为并同步方案/文案）：
+  // 仅用户名形态同样危险——经典仿冒手法 https://example.com@evil.com/ 的真实主机是 evil.com，
+  // 只判 user:pass@ 会放过该形态，故 username/password 任一非空即 danger
   var RULES = [
     { key: 'idnHomograph', level: 'danger', test: function (u) { return hasHomographLabel(u.hostname); } },
     { key: 'userPass', level: 'danger', test: function (u) { return u.username !== '' || u.password !== ''; } },

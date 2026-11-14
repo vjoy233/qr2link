@@ -292,8 +292,8 @@
     "description": "风险原因：punycode 解码后混排拉丁/西里尔/希腊字母"
   },
   "safety_reason_user_pass": {
-    "message": "链接内嵌账号密码（user:pass@）",
-    "description": "风险原因：URL 含凭据"
+    "message": "链接内嵌登录信息（user:pass@，仿冒风险）",
+    "description": "风险原因：URL 含 userinfo 凭据（含仅用户名形态）"
   },
   "safety_reason_http": {
     "message": "HTTP 明文连接，内容可被窥探",

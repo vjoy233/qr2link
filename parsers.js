@@ -102,12 +102,14 @@
   // ---------------- otpauth://（RFC 6238 TOTP / RFC 4226 HOTP URI 格式） ----------------
   var B32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
-  // 严格 Base32 解码（RFC 4648）：去空白/连字符 → 大写 → 字符与尾位合法性校验；
-  // 非法字符 / 非法尾位组合返回 null
+  // 严格 Base32 解码（RFC 4648，canonical 校验，PR #5 review P2 采纳）：
+  // 去空白/连字符 → 大写 → 字符集 / 尾位组合 / 填充数量 / 未用尾位 全量校验；
+  // 非法字符、非规范长度、非 canonical 填充（如 GE= / GE=======）或尾位非零（如 GF）一律 null
   function base32Decode(s) {
     var clean = String(s).replace(/[\s-]/g, '').toUpperCase();
     if (!/^[A-Z2-7]+=*$/.test(clean)) return null;
-    var body = clean.replace(/=+$/, '');
+    var pad = clean.length - clean.replace(/=+$/, '').length;
+    var body = clean.slice(0, clean.length - pad);
     var bits = 0, value = 0, out = [];
     for (var i = 0; i < body.length; i++) {
       var idx = B32_ALPHABET.indexOf(body.charAt(i));
@@ -119,9 +121,17 @@
         bits -= 8;
       }
     }
-    // 尾位合法性：规范的无填充长度（字符数 mod 8 ∈ {0,2,4,5,7}）解码后残位 ∈ 0–4；
-    // 残位 >4 意味着本可再编一个字符的非规范长度（如 6 字符 → 残 6），拒绝
+    // 长度合法性：规范的无填充长度（字符数 mod 8 ∈ {0,2,4,5,7}）解码后残位 ∈ 0–4；
+    // 残位 >4（mod 8 ∈ {1,3,6}）意味着本可再编一个字符，拒绝
     if (bits > 4) return null;
+    // 填充规范性：有 '=' 时数量必须恰为 canonical 值（期望填充 (8 - len%8)%8 ∈ {1,3,4,6}；
+    // body 长已对齐 8 时不允许任何 '='）
+    if (pad > 0) {
+      var expectPad = (8 - (body.length % 8)) % 8;
+      if (expectPad === 0 || pad !== expectPad) return null;
+    }
+    // 未用尾位必须为 0：canonical 编码器只在最后一个字符内补零（如 'GF' 的尾位 01 ≠ 0 → 拒绝）
+    if (bits > 0 && (value & ((1 << bits) - 1)) !== 0) return null;
     return out;
   }
 
@@ -138,6 +148,17 @@
     return (a === 'SHA1' || a === 'SHA256' || a === 'SHA512') ? a : null;
   }
 
+  // query 参数取末值（PR #5 review P2 采纳）：URLSearchParams.get() 取第一个，
+  // 与本文件「重复字段后值覆盖」契约不一致；显式迭代取最后一项（%XX 解码后按键名精确匹配，
+  // 与 URLSearchParams 同源——'secret' 与 '%73ecret' 为同一参数名）
+  function lastParam(sp, name) {
+    var v = null;
+    sp.forEach(function (value, key) {
+      if (key === name) v = value;
+    });
+    return v;
+  }
+
   function parseOtpauth(text) {
     var u;
     try {
@@ -149,29 +170,31 @@
     try {
       label = decodeURIComponent(u.pathname.replace(/^\//, ''));
     } catch (e) { return null; }
-    // label 形如 'issuer:account'（issuer 可选）
+    // label 形如 'issuer:account'（issuer 可选）；issuer 亦可由 query 提供
+    // （Google Key URI 规范）——query issuer 优先，缺省回落 label 前段（PR #5 review P2 采纳）
     var colon = label.indexOf(':');
-    var issuer = colon >= 0 ? label.slice(0, colon) : '';
+    var labelIssuer = colon >= 0 ? label.slice(0, colon) : '';
     var account = colon >= 0 ? label.slice(colon + 1) : label;
     var q = u.searchParams;
-    var secretRaw = q.get('secret');
+    var issuer = lastParam(q, 'issuer') || labelIssuer;
+    var secretRaw = lastParam(q, 'secret');
     if (secretRaw == null || !String(secretRaw).length) return null;
     var secret = String(secretRaw).replace(/[\s-]/g, '').toUpperCase(); // 大小写/空白宽容归一
     var secretBytes = base32Decode(secret);
     if (!secretBytes || !secretBytes.length || secretBytes.length > 128) return null;
-    var algorithm = normalizeAlgorithm(q.get('algorithm'));
+    var algorithm = normalizeAlgorithm(lastParam(q, 'algorithm'));
     if (!algorithm) return null;
-    var digits = parseIntParam(q.get('digits'), 6, 6, 8);
+    var digits = parseIntParam(lastParam(q, 'digits'), 6, 6, 8);
     if (digits == null) return null;
     if (type === 'totp') {
-      var period = parseIntParam(q.get('period'), 30, 2, 3600);
+      var period = parseIntParam(lastParam(q, 'period'), 30, 2, 3600);
       if (period == null) return null;
       return {
         kind: 'totp', issuer: issuer, account: account, secret: secret,
         digits: digits, period: period, algorithm: algorithm,
       };
     }
-    var counter = parseIntParam(q.get('counter'), 0, 0, Number.MAX_SAFE_INTEGER);
+    var counter = parseIntParam(lastParam(q, 'counter'), 0, 0, Number.MAX_SAFE_INTEGER);
     if (counter == null) return null;
     return {
       kind: 'hotp', issuer: issuer, account: account, secret: secret,
@@ -180,11 +203,19 @@
   }
 
   // RFC 6238 动态码（拍板①）：WebCrypto HMAC + 动态截断；atMs 缺省取当前时间。
-  // secretB32 为 Base32 密钥；opts 与 parse 输出字段同构
+  // secretB32 为 Base32 密钥；opts 与 parse 输出字段同构。
+  // 参数校验与 parseOtpauth 共享口径（PR #5 review P3 采纳）：digits/period 越界或非整数
+  // 一律 reject，不静默吞成默认值；缺省时才取 6 / 30
   function generateTotp(secretB32, opts, atMs) {
     opts = opts || {};
-    var digits = opts.digits || 6;
-    var period = opts.period || 30;
+    var digits = opts.digits == null ? 6 : opts.digits;
+    if (typeof digits !== 'number' || !Number.isInteger(digits) || digits < 6 || digits > 8) {
+      return Promise.reject(new Error('BAD_DIGITS'));
+    }
+    var period = opts.period == null ? 30 : opts.period;
+    if (typeof period !== 'number' || !Number.isInteger(period) || period < 2 || period > 3600) {
+      return Promise.reject(new Error('BAD_PERIOD'));
+    }
     var hashName = { SHA1: 'SHA-1', SHA256: 'SHA-256', SHA512: 'SHA-512' }[String(opts.algorithm || 'SHA1').toUpperCase()];
     if (!hashName) return Promise.reject(new Error('BAD_ALGORITHM'));
     var keyBytes = base32Decode(secretB32);
@@ -207,21 +238,36 @@
       });
   }
 
+  // 倒计时纯函数（显示用）：period 非法时按默认 30 兜底（非法值不产生 NaN 污染 UI；
+  // 真正的校验在 parseOtpauth / generateTotp 侧，PR #5 review P3）
   function totpRemaining(period, atMs) {
-    period = period || 30;
+    if (typeof period !== 'number' || !Number.isInteger(period) || period < 1) period = 30;
     var sec = Math.floor((atMs == null ? Date.now() : atMs) / 1000);
     return period - (sec % period);
   }
 
   // ---------------- vCard（BEGIN:VCARD … END:VCARD） ----------------
+  // 单趟左到右扫描反转义（PR #5 review P2 采纳）：vCard 3.0 的 \\ \n(\N) \; \,；
+  // 两段 replace 会把字面量「反斜杠 + n」（\\n 序列）误变两次——'a\\nb' 应得 'a\nb'
+  // （反斜杠 + 字母 n），而非换行
   function vcardUnescape(v) {
-    // vCard 3.0 转义：\\ \; \, \n（\n / \N 为换行）
-    return v.replace(/\\[nN]/g, '\n').replace(/\\(.)/g, '$1');
+    var out = '', i = 0;
+    while (i < v.length) {
+      var c = v.charAt(i);
+      if (c === '\\' && i + 1 < v.length) {
+        var n = v.charAt(i + 1);
+        out += (n === 'n' || n === 'N') ? '\n' : n;
+        i += 2;
+      } else {
+        out += c;
+        i++;
+      }
+    }
+    return out;
   }
 
   function parseVcard(text) {
     if (!/^BEGIN:VCARD\r?\n/i.test(text)) return null;
-    if (!/END:VCARD/i.test(text)) return null;
     var rawLines = text.split(/\r?\n/);
     if (rawLines.length > VCARD_MAX_LINES) return null;
     for (var i = 0; i < rawLines.length; i++) {
@@ -238,13 +284,28 @@
       }
       lines.push(ln);
     }
+    // 记录级校验（PR #5 review P2 采纳）：END:VCARD 必须是独立记录行——值里出现
+    // （如 FN:END:VCARD）不算结束；结束后只允许空行；无冒号的非结构行拒绝
+    // （与「畸形一律 null、绝不半解析」契约一致；未知属性「有冒号」仍宽容忽略）
+    if (lines[0].toUpperCase() !== 'BEGIN:VCARD') return null;
+    var endIdx = -1;
+    for (var r = 1; r < lines.length; r++) {
+      var rl = lines[r];
+      if (!rl) continue; // 空行（含结尾换行产生的尾空行）忽略
+      var upper = rl.toUpperCase();
+      if (endIdx < 0 && upper === 'END:VCARD') { endIdx = r; continue; }
+      if (endIdx >= 0) return null; // 结束记录之后的非空尾随内容 → 拒绝
+      if (upper === 'BEGIN:VCARD') return null; // 不支持嵌套
+      if (rl.indexOf(':') <= 0) return null; // 无冒号 / 无属性名的非结构行 → 拒绝
+    }
+    if (endIdx < 0) return null; // 无独立结束记录
     var fn = '', org = '', title = '';
     var tels = [], emails = [];
-    for (var k = 0; k < lines.length; k++) {
+    for (var k = 1; k < endIdx; k++) {
       var line = lines[k];
       if (!line) continue;
       var c = line.indexOf(':');
-      if (c <= 0) continue; // 畸形行跳过（VERSION 等无值行亦如此处理）
+      if (c <= 0) continue; // 上方记录级校验已拒绝；此处兜底
       var name = line.slice(0, c).split(';')[0].toUpperCase(); // 剥离 ;TYPE=… 等参数
       var value = vcardUnescape(line.slice(c + 1));
       if (name === 'FN') fn = value;
@@ -261,8 +322,10 @@
   }
 
   // ---------------- tel: / sms: / smsto: / mailto: / geo:（仅复制，不打开） ----------------
+  // 号号最小语法（PR #5 review P2 采纳）：'+' 只允许出现在首位（0 或 1 次），其余为
+  // 数字/分隔符；且必须含至少一个数字（拒绝 'tel:+' / 'tel:++' / 'tel:()'）
   function checkTelNumber(num) {
-    return /^[+0-9\-().\s]{1,64}$/.test(num) && /[0-9+]/.test(num);
+    return /^\+?[0-9\-().\s]{1,63}$/.test(num) && /[0-9]/.test(num);
   }
 
   function safeDecode(s) {
@@ -287,11 +350,11 @@
         body = safeDecode(rest.slice(comma + 1));
       } else {
         number = safeDecode((q >= 0 ? rest.slice(0, q) : rest).trim());
-        if (q >= 0) body = new URLSearchParams(rest.slice(q + 1)).get('body');
+        if (q >= 0) body = lastParam(new URLSearchParams(rest.slice(q + 1)), 'body');
       }
     } else {
       number = safeDecode((q >= 0 ? rest.slice(0, q) : rest).trim());
-      if (q >= 0) body = new URLSearchParams(rest.slice(q + 1)).get('body');
+      if (q >= 0) body = lastParam(new URLSearchParams(rest.slice(q + 1)), 'body');
     }
     if (!number || !checkTelNumber(number)) return null;
     if (body != null && body.length > URI_MAX_VALUE) return null;
@@ -306,8 +369,8 @@
     var subject = null, body = null;
     if (q >= 0) {
       var sp = new URLSearchParams(rest.slice(q + 1));
-      subject = sp.get('subject');
-      body = sp.get('body');
+      subject = lastParam(sp, 'subject'); // 重复参数末值覆盖（与本文件契约一致）
+      body = lastParam(sp, 'body');
     }
     if (subject != null && subject.length > URI_MAX_VALUE) return null;
     if (body != null && body.length > URI_MAX_VALUE) return null;
@@ -317,8 +380,17 @@
   function parseGeo(text) {
     var rest = text.slice(4).split(';')[0]; // 剥离 ;crs=… 等参数
     var parts = rest.split(',');
-    if (parts.length < 2) return null;
+    // RFC 5870：lat,lon[,alt]——至多三段（PR #5 review P2 采纳：第三段存在即须为合法数值，
+    // 更多逗号段拒绝；每段长度受 URI_MAX_VALUE 约束）
+    if (parts.length < 2 || parts.length > 3) return null;
     var lat = parts[0].trim(), lon = parts[1].trim();
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i].trim().length > URI_MAX_VALUE) return null;
+    }
+    if (parts.length === 3) {
+      var alt = parts[2].trim();
+      if (!/^[-+]?\d+(\.\d+)?$/.test(alt)) return null; // 海拔可为负
+    }
     if (!/^-?\d+(\.\d+)?$/.test(lat) || !/^-?\d+(\.\d+)?$/.test(lon)) return null;
     var la = parseFloat(lat), lo = parseFloat(lon);
     if (la < -90 || la > 90 || lo < -180 || lo > 180) return null;
@@ -328,9 +400,27 @@
   // ---------------- 显示层打码（存储 / 复制保持原文） ----------------
   var MASK = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022'; // •×8
 
+  // PR #5 review P1 修复：不再用字面量正则匹配 secret=（可被 %73ecret 编码参数名绕过、
+  // 重复参数只遮蔽首项），改为按 URL 解析重建显示串——参数名以解码后形态匹配
+  // （与 parseOtpauth 的 URLSearchParams 语义一致），重复 secret 逐项全部遮蔽；
+  // 重建仅用于显示（其余参数值规范化重编码），存储/复制仍取原文
   function maskSecrets(text) {
-    if (typeof text !== 'string' || !/^otpauth:\/\//i.test(text)) return text;
-    return text.replace(/([?&]secret=)[^&]*/i, '$1' + MASK);
+    if (typeof text !== 'string') return text;
+    var t = text.trim();
+    if (!/^otpauth:\/\//i.test(t)) return text;
+    var u;
+    try {
+      u = new URL(t);
+    } catch (e) {
+      return text; // 畸形 otpauth：parse 亦不命中（回落纯文本卡片按原文展示），无打码面
+    }
+    var parts = [];
+    u.searchParams.forEach(function (value, name) {
+      parts.push(encodeURIComponent(name) + '=' +
+        (name.toLowerCase() === 'secret' ? MASK : encodeURIComponent(value)));
+    });
+    return u.protocol + '//' + u.host + u.pathname +
+      (parts.length ? '?' + parts.join('&') : '') + u.hash;
   }
 
   // ---------------- 主入口 ----------------

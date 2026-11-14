@@ -1706,6 +1706,109 @@ async function suiteF(h) {
     assertEq(await page.evaluate(() => window.__ivActive.size), 0, '视图切换后 interval 应全部清理');
   });
 
+  // ---- PR #5 AIbot review 采纳用例（F18–F23 / G7）----
+
+  await t('F18 maskSecrets 抗绕过：编码参数名 %73ecret 与重复 secret 逐项全遮蔽（PR #5 review P1）', async () => {
+    const r = await page.evaluate(() => {
+      const P = window.Parsers;
+      return {
+        parseEnc: P.parse('otpauth://totp/a?%73ecret=GEZDGNBV'),
+        enc: P.maskSecrets('otpauth://totp/a?%73ecret=GEZDGNBV'),
+        dup: P.maskSecrets('otpauth://totp/a?secret=AAAAAAA1&digits=6&secret=BBBBBBB2'),
+        pad: P.maskSecrets('  otpauth://totp/a?secret=GEZDGNBV  '),
+      };
+    });
+    assertEq(r.parseEnc && r.parseEnc.kind, 'totp', 'URLSearchParams 语义下 %73ecret 即 secret');
+    assertEq(r.parseEnc.secret, 'GEZDGNBV', 'parse 应命中编码参数名（与遮蔽同源）');
+    assert(r.enc.indexOf('GEZDGNBV') === -1, '编码参数名的 secret 必须被遮蔽');
+    assert(r.enc.indexOf('secret=\u2022\u2022') > 0, '遮蔽后应显示打码值');
+    assert(r.dup.indexOf('AAAAAAA1') === -1 && r.dup.indexOf('BBBBBBB2') === -1, '重复 secret 两项都遮蔽');
+    assertEq((r.dup.match(/secret=\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022/g) || []).length, 2, '两个 secret 参数各有打码');
+    assert(r.dup.indexOf('digits=6') > 0, '其余参数保留');
+    assert(r.pad.indexOf('GEZDGNBV') === -1 && r.pad.indexOf('\u2022\u2022\u2022\u2022') >= 0, '前后空白输入宽容处理');
+  });
+
+  await t('F19 vCard 边界：伪结束标记值/尾随垃圾/无冒号行拒绝；字面量反斜杠+n 正确反转义（PR #5 review P2）', async () => {
+    const out = await parseAll([
+      'BEGIN:VCARD\r\nVERSION:3.0\r\nFN:END:VCARD\r\n',   // 值里伪造结束标记 → 无独立 END
+      'BEGIN:VCARD\r\nFN:X\r\nEND:VCARD\r\nTRAILING\r\n', // 结束记录后尾随非空内容
+      'BEGIN:VCARD\r\nTEL 123\r\nEND:VCARD',              // 无冒号的非结构行
+    ]);
+    for (let i = 0; i < out.length; i++) assertEq(out[i], null, `负面 #${i + 1} 应返回 null`);
+    // 单趟反转义：'a\\nb'（转义反斜杠 + 字母 n）→ 字面量 'a\nb'；'a\nb' → 真换行
+    const [p1, p2] = await parseAll(['BEGIN:VCARD\r\nFN:a\\\\nb\r\nEND:VCARD', 'BEGIN:VCARD\r\nFN:a\\nb\r\nEND:VCARD']);
+    assertEq(p1 && p1.fn, 'a\\nb', '字面量反斜杠+n 不得被误解为换行');
+    assertEq(p2 && p2.fn, 'a\nb', '\\n 转义仍为换行');
+  });
+
+  await t('F20 otpauth query issuer 优先 + query 参数末值覆盖（重复 secret / mailto body；PR #5 review P2）', async () => {
+    const out = await parseAll([
+      'otpauth://totp/alice?issuer=Google&secret=GEZDGNBV',
+      'otpauth://totp/LabelIss:acc?issuer=QueryIss&secret=GEZDGNBV',
+      'otpauth://totp/a?secret=ABC01XYZ&secret=GEZDGNBV',
+      'mailto:a@b.c?body=first&body=second',
+    ]);
+    assertEq(out[0].issuer, 'Google', 'query-only issuer 命中');
+    assertEq(out[0].account, 'alice', '无冒号 label 整体为 account');
+    assertEq(out[1].issuer, 'QueryIss', 'label 与 query 同在时 query 优先（锁定契约）');
+    assertEq(out[1].account, 'acc', 'account 不受 query issuer 影响');
+    assertEq(out[2].secret, 'GEZDGNBV', '重复 secret 末值覆盖（首值非法不再整体拒绝）');
+    assertEq(out[3].body, 'second', 'mailto 重复 body 末值覆盖');
+  });
+
+  await t('F21 Base32 canonical 校验：非法填充数/非零尾位/全填充拒绝，canonical 填充通过（PR #5 review P2）', async () => {
+    const out = await parseAll([
+      'otpauth://totp/a?secret=GE=',       // 填充 1（canonical 应为 6）
+      'otpauth://totp/a?secret=GE=======', // 填充 7
+      'otpauth://totp/a?secret=GF',        // 未用尾位非零
+      'otpauth://totp/a?secret=====',      // 全填充（空 body）
+      'otpauth://totp/a?secret=GE======',  // canonical：2 字符 + 6 填充
+    ]);
+    for (let i = 0; i < 4; i++) assertEq(out[i], null, `非 canonical #${i + 1} 应返回 null`);
+    assertEq(out[4] && out[4].kind, 'totp', 'canonical 填充形态应通过');
+  });
+
+  await t('F22 tel 最小语法与 geo 第三段/超长校验（PR #5 review P2）', async () => {
+    const longLat = 'geo:1.' + '0'.repeat(300) + ',2';
+    const out = await parseAll([
+      'tel:+',                 // 无数字
+      'tel:++',                // '+' 重复
+      'tel:12+34',             // '+' 中置
+      'geo:1,2,not-a-number',  // 非法海拔
+      'geo:1,2,3,4',           // 超过三段
+      longLat,                 // 坐标段超长（>256）
+      'geo:1,2,3',             // 合法海拔（不展示，仅校验）
+    ]);
+    for (let i = 0; i < 6; i++) assertEq(out[i], null, `负面 #${i + 1} 应返回 null`);
+    assertEq(out[6] && out[6].kind, 'geo', '合法第三段（海拔）应通过');
+  });
+
+  await t('F23 generateTotp/totpRemaining 参数校验与 parse 口径一致（PR #5 review P3）', async () => {
+    const r = await page.evaluate(async () => {
+      const P = window.Parsers;
+      const S = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+      const tryIt = (opts) => P.generateTotp(S, opts, 59000).then(() => 'ok', (e) => e.message);
+      return {
+        d5: await tryIt({ digits: 5 }),
+        d9: await tryIt({ digits: 9 }),
+        dFloat: await tryIt({ digits: 6.5 }),
+        p0: await tryIt({ period: 0 }),
+        pBig: await tryIt({ period: 3601 }),
+        ok: await tryIt({ digits: 6, period: 30 }),
+        rZero: P.totpRemaining(0, 30000),
+        rNeg: P.totpRemaining(-5, 30000),
+      };
+    });
+    assertEq(r.d5, 'BAD_DIGITS', 'digits=5 拒绝');
+    assertEq(r.d9, 'BAD_DIGITS', 'digits=9 拒绝');
+    assertEq(r.dFloat, 'BAD_DIGITS', '非整数 digits 拒绝');
+    assertEq(r.p0, 'BAD_PERIOD', 'period=0 拒绝');
+    assertEq(r.pBig, 'BAD_PERIOD', 'period=3601 拒绝');
+    assertEq(r.ok, 'ok', '合法参数照常生成');
+    assertEq(r.rZero, 30, 'totpRemaining 非法 period 兜底 30');
+    assertEq(r.rNeg, 30, 'totpRemaining 负 period 兜底 30');
+  });
+
   await page.close().catch(() => {});
   await h.sw.evaluate(() => chrome.storage.local.clear()).catch(() => {});
 }
@@ -1837,6 +1940,14 @@ async function suiteG(h) {
     await opened.close().catch(() => {});
     // safety.js 不进 SW：openFirstLink 在依赖上无法接入预检（background.js 防合并注释）
     assertEq(await h.sw.evaluate(() => typeof self.Safety), 'undefined', 'SW 中不应存在 Safety 全局');
+  });
+
+  await t('G7 userPass 宽口径锁定：仅用户名 userinfo（user@host）同样 danger（PR #5 review P2 采纳）', async () => {
+    const out = await assess(['https://user@example.com/', 'https://example.com@evil.com/']);
+    for (let i = 0; i < out.length; i++) {
+      assertEq(out[i].level, 'danger', `仅用户名形态 #${i + 1} 应为 danger（@ 仿冒手法）`);
+      assertEq(out[i].reasons.join(), 'userPass', '命中 userPass');
+    }
   });
 
   await page.close().catch(() => {});

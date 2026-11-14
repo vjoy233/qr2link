@@ -292,8 +292,8 @@
     "description": "Risk reason: punycode-decoded label mixes Latin/Cyrillic/Greek"
   },
   "safety_reason_user_pass": {
-    "message": "URL embeds credentials (user:pass@)",
-    "description": "Risk reason: URL contains userinfo"
+    "message": "URL embeds login info (user:pass@, spoofing risk)",
+    "description": "Risk reason: URL contains userinfo (username-only included)"
   },
   "safety_reason_http": {
     "message": "Unencrypted HTTP connection",
