@@ -179,22 +179,28 @@ function makeAssets() {
     pdf += `trailer\n<</Size ${objs.length + 1}/Root 1 0 R>>\nstartxref\n${xrefAt}\n%%EOF\n`;
     fs.writeFileSync(path.join(OUT_DIR, 'mini.pdf'), pdf, 'latin1');
 
-    // 摄像头「真机等价」MJPEG（PR-4 人工冒烟自动化补强，I11/I11b）：480×360 白底中央
-    // 300px QR 的单帧 JPEG × 15——喂给 --use-file-for-fake-video-capture 后作为假想采集
-    // 设备（按扩展名 .mjpeg 选中 MjpegFileParser：标准 JPEG 帧流、固定 30fps、EOF 自动
-    // 循环重播，源码「Reset the pointer to play repeatedly」）。帧内容 = 真实码图，经
-    // 完整媒体管线（getUserMedia → rVFC → drawImage → decodeFrame → 命中横幅）全程走
-    // 生产代码零注入；码内容用独立 URL，与 I3 注入的 normal.png 区分，证明命中确来自
-    // 实帧。不用 y4m：Chromium 的 Y4M 解析器有非标准定界（FRAME 恰 5 字节无换行、
-    // 头部需尾随空格），实测帧错位/设备不稳；MJPEG 路线为纯标准 JPEG 无此坑
+    // 摄像头「真机等价」MJPEG ×2 分辨率变体（I11/I11b 常规 480×360；I12 高分辨率
+    // 2560×1440 模拟 4K 级源、锁定 submitFrame 降采样路径）——喂给
+    // --use-file-for-fake-video-capture 后作为假想采集设备（按扩展名 .mjpeg 选中
+    // MjpegFileParser：标准 JPEG 帧流、固定 30fps、EOF 自动循环重播，源码「Reset the
+    // pointer to play repeatedly」）。帧内容 = 真实码图，经完整媒体管线（getUserMedia →
+    // rVFC → drawImage → decodeFrame → 命中横幅）全程走生产代码零注入；码内容用独立
+    // URL，与 I3 注入的 normal.png 区分，证明命中确来自实帧。不用 y4m：Chromium 的
+    // Y4M 解析器有非标准定界（FRAME 恰 5 字节无换行、头部需尾随空格），实测帧错位/
+    // 设备不稳；MJPEG 路线为纯标准 JPEG 无此坑
     {
-      const W = 480, H = 360, QR = 300, FRAMES = 15;
-      const qrBuf = await QRCode.toBuffer('https://example.com/qr2link-camera-live', { width: QR, margin: 2 });
-      const png = await sharp({
-        create: { width: W, height: H, channels: 3, background: '#ffffff' },
-      }).composite([{ input: qrBuf, left: (W - QR) / 2, top: (H - QR) / 2 }]).png().toBuffer();
-      const jpg = await sharp(png).jpeg({ quality: 92 }).toBuffer();
-      fs.writeFileSync(path.join(OUT_DIR, 'qr-camera.mjpeg'), Buffer.concat(Array(FRAMES).fill(jpg)));
+      const FRAMES = 15;
+      for (const [name, W, H, QR, url] of [
+        ['qr-camera.mjpeg', 480, 360, 300, 'https://example.com/qr2link-camera-live'],
+        ['qr-camera-hi.mjpeg', 2560, 1440, 1200, 'https://example.com/qr2link-camera-hi'],
+      ]) {
+        const qrBuf = await QRCode.toBuffer(url, { width: QR, margin: 2 });
+        const png = await sharp({
+          create: { width: W, height: H, channels: 3, background: '#ffffff' },
+        }).composite([{ input: qrBuf, left: (W - QR) / 2, top: (H - QR) / 2 }]).png().toBuffer();
+        const jpg = await sharp(png).jpeg({ quality: 92 }).toBuffer();
+        fs.writeFileSync(path.join(OUT_DIR, name), Buffer.concat(Array(FRAMES).fill(jpg)));
+      }
     }
   })();
 }
@@ -2483,11 +2489,14 @@ async function suiteH(h) {
 //   帧（与生产共用 decodeFrame 与 onHit 路径）（I3–I6）；
 //   错误路径用 addInitScript 钉死 getUserMedia 拒绝形态（I9/I10）
 // 真机等价层（人工冒烟自动化补强）：独立 MJPEG 变体 context，fake 采集设备的帧内容 =
-// 真实码图（qr-camera.mjpeg）→ 生产链路零注入自动命中 + 自动打开/继续扫（I11/I11b）
+// 真实码图（qr-camera.mjpeg）→ 生产链路零注入自动命中 + 自动打开/继续扫（I11/I11b）；
+// 高分辨率变体 2560×1440（qr-camera-hi.mjpeg）锁定 submitFrame 降采样（I12）。
+// 失败生命周期与竞态（PR #7 AIbot review 采纳回归）：双重启动竞态止损（I13）、
+// track ended 中断引导与重试（I14）、BFCache pageshow 恢复（I15）、无 label i18n 兜底（I16）
 
 async function suiteI() {
   currentGroup = 'I-CAMERA';
-  console.log('\n== I-CAMERA: 摄像头扫码（真实链路层 + 确定性解码层 + 真机等价 MJPEG 实帧，fake media 变体） ==');
+  console.log('\n== I-CAMERA: 摄像头扫码（真实链路 + 确定性解码 + 真机等价 MJPEG ×2 分辨率 + 失败生命周期/竞态） ==');
 
   const NORMAL_URL = 'https://example.com/qr2link-test'; // test/normal.png 的码内容（gen-qr.mjs 锚定）
 
@@ -2733,6 +2742,140 @@ async function suiteI() {
     } finally {
       if (hv) await hv.close().catch(() => {});
     }
+
+    // ---- 真机等价·高分辨率（I12，PR #7 AIbot review P1/P2 采纳回归） ----
+    const mjpegHi = path.join(OUT_DIR, 'qr-camera-hi.mjpeg');
+    let hvHi;
+    try {
+      hvHi = await launch({ channel: CHANNEL, lang: LANG, videoFile: mjpegHi });
+      console.log(`扩展已加载（真机等价 MJPEG 高分辨率变体）：${hvHi.extId}`);
+
+      await t('I12 真机等价·高分辨率双层防护：ideal 约束把 2560 源钉到 1280 交付；applyConstraints 推回 2560 后 submitFrame 硬性降采样仍命中', async () => {
+        const page = await newCamera(hvHi);
+        await waitStats(page, (s) => s.hits >= 1 && !s.scanning, 20000, '第一层：约束内实帧命中');
+        assertEq(await page.evaluate(() => document.querySelector('#camera-video').videoWidth), 1280, 'ideal 约束生效：2560 文件源交付为 1280（约束层防护）');
+        assertEq(await page.locator('#camera-banner-text').textContent(), 'https://example.com/qr2link-camera-hi', '横幅文本 = 高分辨率源码内容');
+        // 第二层：模拟「不满足 ideal 的真实摄像头」（如仅有 4K 原生模式）——
+        // applyConstraints 把轨推回文件原生 2560×1440，submitFrame 的 FRAME_MAX_SIDE 硬兜底接管
+        await page.evaluate(() => {
+          const t = document.querySelector('#camera-video').srcObject.getVideoTracks()[0];
+          return t.applyConstraints({ width: 2560, height: 1440 });
+        });
+        await page.waitForFunction(() => document.querySelector('#camera-video').videoWidth === 2560, null, { timeout: 8000 });
+        await page.locator('#camera-resume').click(); // 重建循环（流仍活）
+        await waitStats(page, (s) => s.hits >= 2 && !s.scanning, 20000, '第二层：降采样后实帧再次命中');
+        assertEq(await page.evaluate(() => document.querySelector('#camera-video').videoWidth), 2560, '轨仍为 2560（降采样只发生在解码帧，不改轨）');
+        await page.close().catch(() => {});
+      });
+    } finally {
+      if (hvHi) await hvHi.close().catch(() => {});
+    }
+
+    // ---- 失败生命周期与竞态（I13–I16，PR #7 AIbot review 采纳项回归，green-ball 上下文） ----
+
+    await t('I13 双重启动竞态：getUserMedia 在途时再次 start()（切设备）→ 最终恰一个 live 流、旧流 tracks 全部止损（startSeq）', async () => {
+      const page = await h.context.newPage();
+      page.on('pageerror', (e) => pageErrors.push({ url: page.url(), err: String(e) }));
+      // 钉死时序：enumerateDevices 恒报 2 摄像头（使选择器可见、可触发 start）；
+      // getUserMedia 统一延迟 1200ms 并记录每次返回的流（约束剥离防 exact deviceId 撞假设备）
+      await page.addInitScript(() => {
+        const orig = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        navigator.mediaDevices.enumerateDevices = () => Promise.resolve([
+          { kind: 'videoinput', deviceId: 'cam-a', label: 'A' },
+          { kind: 'videoinput', deviceId: 'cam-b', label: 'B' },
+        ]);
+        navigator.mediaDevices.getUserMedia = () => new Promise((res, rej) => {
+          setTimeout(() => orig({ audio: false, video: true }).then((s) => {
+            (window.__gumStreams = window.__gumStreams || []).push(s);
+            res(s);
+          }, rej), 1200);
+        });
+      });
+      await page.goto(camUrl);
+      await page.locator('#camera-device').waitFor({ state: 'visible', timeout: 8000 }); // 首次取流 resolve 后渲染
+      await page.selectOption('#camera-device', 'cam-b'); // start#2（#1 已 resolve，被 stopAll）
+      await sleep(300); // 让 #2 进入在途
+      await page.selectOption('#camera-device', 'cam-a'); // start#3 → #2 成为过期请求
+      await waitStats(page, (s) => s.scanning, 15000, '末次 start 进入扫描');
+      await sleep(1500); // 等过期 #2 的延迟 resolve 被 startSeq 拦截并止损
+      const audit = await page.evaluate(() => {
+        const streams = window.__gumStreams || [];
+        const v = document.querySelector('#camera-video');
+        return {
+          count: streams.length,
+          live: streams.filter((s) => s.getVideoTracks().some((t) => t.readyState === 'live')).length,
+          srcIsLast: streams.length > 0 && v.srcObject === streams[streams.length - 1],
+          srcLive: !!(v.srcObject && v.srcObject.getVideoTracks().some((t) => t.readyState === 'live')),
+        };
+      });
+      assertEq(audit.count, 3, '三次取流都被发起（时序可控）');
+      assertEq(audit.live, 1, '最终恰一个 live 流（#1 被 stopAll、#2 过期止损）');
+      assert(audit.srcIsLast && audit.srcLive, 'srcObject 应为最后一次 start 的存活流');
+      assertEq((await page.evaluate(() => window.Camera.__testStats())).scanning, true, '当前流正常扫描');
+      await page.close().catch(() => {});
+    });
+
+    await t('I14 运行中流中断：track ended（设备拔出/权限撤销语义）→ 停循环 + 中断引导可重试；重试恢复扫描', async () => {
+      const page = await newCamera(h);
+      await waitStats(page, (s) => s.scanning && s.streamLive, 15000, '进入扫描');
+      await page.evaluate(() => {
+        // 真实拔出由浏览器派发 ended；track.stop() 不派发 → 手动补事件（与 I7/I8 合成事件同口径）
+        const t = document.querySelector('#camera-video').srcObject.getVideoTracks()[0];
+        t.stop();
+        t.dispatchEvent(new Event('ended'));
+      });
+      await page.locator('#camera-guide').waitFor({ state: 'visible', timeout: 5000 });
+      assertEq(await page.locator('#camera-guide-text').textContent(), msg('camera_stream_lost'), '中断引导文案');
+      assert(await page.locator('#camera-retry').isVisible(), '提供重试');
+      const st = await page.evaluate(() => window.Camera.__testStats());
+      assertEq(st.scanning, false, '已停循环');
+      assertEq(st.streamLive, false, '流已清理');
+      await page.locator('#camera-retry').click();
+      await waitStats(page, (s) => s.scanning && s.streamLive, 15000, '重试恢复扫描');
+      await page.close().catch(() => {});
+    });
+
+    await t('I15 BFCache：pagehide 停流 → pageshow(persisted) 自动恢复；横幅态返回不自动恢复（用户显式继续）', async () => {
+      const page = await newCamera(h);
+      await waitStats(page, (s) => s.scanning && s.streamLive, 15000, '进入扫描');
+      await page.evaluate(() => { window.dispatchEvent(new Event('pagehide')); });
+      await waitStats(page, (s) => !s.scanning && !s.streamLive, 5000, 'pagehide 停止');
+      await page.evaluate(() => {
+        const e = new Event('pageshow');
+        Object.defineProperty(e, 'persisted', { value: true });
+        window.dispatchEvent(e);
+      });
+      await waitStats(page, (s) => s.scanning && s.streamLive, 15000, 'BFCache 返回恢复');
+      await injectNormal(page); // 命中横幅态（停扫描）
+      await page.locator('#camera-banner').waitFor({ state: 'visible', timeout: 5000 });
+      await page.evaluate(() => { window.dispatchEvent(new Event('pagehide')); });
+      await page.evaluate(() => {
+        const e = new Event('pageshow');
+        Object.defineProperty(e, 'persisted', { value: true });
+        window.dispatchEvent(e);
+      });
+      await sleep(700);
+      assertEq((await page.evaluate(() => window.Camera.__testStats())).scanning, false, '横幅态 BFCache 返回不自动恢复');
+      assert(await page.locator('#camera-banner').isVisible(), '横幅仍在');
+      await page.close().catch(() => {});
+    });
+
+    await t('I16 无 label 设备兜底 i18n：枚举返回空 label 多摄像头 → 选择器选项为本地化「摄像头 N」（无英文硬编码）', async () => {
+      const page = await h.context.newPage();
+      page.on('pageerror', (e) => pageErrors.push({ url: page.url(), err: String(e) }));
+      await page.addInitScript(() => {
+        navigator.mediaDevices.enumerateDevices = () => Promise.resolve([
+          { kind: 'videoinput', deviceId: 'x1', label: '' },
+          { kind: 'videoinput', deviceId: 'x2', label: '' },
+        ]);
+      });
+      await page.goto(camUrl);
+      await waitStats(page, (s) => s.scanning && s.streamLive, 15000, '进入扫描');
+      await page.locator('#camera-device').waitFor({ state: 'visible', timeout: 5000 });
+      const labels = await page.locator('#camera-device option').evaluateAll((els) => els.map((e) => e.textContent));
+      assertEq(labels.join('|'), msg('camera_unknown_device') + ' 1|' + msg('camera_unknown_device') + ' 2', '兜底名走 i18n');
+      await page.close().catch(() => {});
+    });
   } finally {
     if (h) await h.close().catch(() => {});
   }
