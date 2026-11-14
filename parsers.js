@@ -400,27 +400,39 @@
   // ---------------- 显示层打码（存储 / 复制保持原文） ----------------
   var MASK = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022'; // •×8
 
-  // PR #5 review P1 修复：不再用字面量正则匹配 secret=（可被 %73ecret 编码参数名绕过、
-  // 重复参数只遮蔽首项），改为按 URL 解析重建显示串——参数名以解码后形态匹配
-  // （与 parseOtpauth 的 URLSearchParams 语义一致），重复 secret 逐项全部遮蔽；
-  // 重建仅用于显示（其余参数值规范化重编码），存储/复制仍取原文
+  // PR #5 review P1 修复 + 复核 P3 改进：对原始 query 做「段级替换」——只把解码后
+  // 参数名为 secret（大小写宽容，%73ecret 等编码形态同源）的段替换为打码值，其余段、
+  // path 与编码形态全部原样保留（issuer=Foo+Bar 不会被重编码成 Foo%20Bar）；重复
+  // secret 逐项全部遮蔽。契约：显示层允许去掉首尾空白（判断前 trim）；存储/复制取原文。
+  // new URL 仅作「可解析的 URL 形态」守门，失败原样返回（parse 亦不命中，无打码面）
   function maskSecrets(text) {
     if (typeof text !== 'string') return text;
     var t = text.trim();
     if (!/^otpauth:\/\//i.test(t)) return text;
-    var u;
     try {
-      u = new URL(t);
+      new URL(t);
     } catch (e) {
-      return text; // 畸形 otpauth：parse 亦不命中（回落纯文本卡片按原文展示），无打码面
+      return text;
     }
-    var parts = [];
-    u.searchParams.forEach(function (value, name) {
-      parts.push(encodeURIComponent(name) + '=' +
-        (name.toLowerCase() === 'secret' ? MASK : encodeURIComponent(value)));
-    });
-    return u.protocol + '//' + u.host + u.pathname +
-      (parts.length ? '?' + parts.join('&') : '') + u.hash;
+    var hashIdx = t.indexOf('#');
+    var head = hashIdx >= 0 ? t.slice(0, hashIdx) : t;
+    var tail = hashIdx >= 0 ? t.slice(hashIdx) : '';
+    var qIdx = head.indexOf('?');
+    if (qIdx < 0) return head + tail; // 无 query 即无 secret
+    var segments = head.slice(qIdx + 1).split('&');
+    for (var i = 0; i < segments.length; i++) {
+      var seg = segments[i];
+      var eq = seg.indexOf('=');
+      if (eq <= 0) continue; // 裸 flag 段 / 无 '=' 段不动
+      var name = null;
+      try {
+        name = decodeURIComponent(seg.slice(0, eq));
+      } catch (e) { name = null; } // 非法 %XX：URLSearchParams 同样按字面保留，不匹配
+      if (name !== null && name.toLowerCase() === 'secret') {
+        segments[i] = seg.slice(0, eq + 1) + MASK;
+      }
+    }
+    return head.slice(0, qIdx + 1) + segments.join('&') + tail;
   }
 
   // ---------------- 主入口 ----------------

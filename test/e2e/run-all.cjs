@@ -1708,7 +1708,7 @@ async function suiteF(h) {
 
   // ---- PR #5 AIbot review 采纳用例（F18–F23 / G7）----
 
-  await t('F18 maskSecrets 抗绕过：编码参数名 %73ecret 与重复 secret 逐项全遮蔽（PR #5 review P1）', async () => {
+  await t('F18 maskSecrets 抗绕过：编码参数名 %73ecret 与重复 secret 逐项全遮蔽；非 secret 段原样保留（PR #5 review P1 + 复核 P3）', async () => {
     const r = await page.evaluate(() => {
       const P = window.Parsers;
       return {
@@ -1716,16 +1716,20 @@ async function suiteF(h) {
         enc: P.maskSecrets('otpauth://totp/a?%73ecret=GEZDGNBV'),
         dup: P.maskSecrets('otpauth://totp/a?secret=AAAAAAA1&digits=6&secret=BBBBBBB2'),
         pad: P.maskSecrets('  otpauth://totp/a?secret=GEZDGNBV  '),
+        keep: P.maskSecrets('otpauth://totp/a?issuer=Foo+Bar&secret=GEZDGNBV&note=a+b'),
       };
     });
     assertEq(r.parseEnc && r.parseEnc.kind, 'totp', 'URLSearchParams 语义下 %73ecret 即 secret');
     assertEq(r.parseEnc.secret, 'GEZDGNBV', 'parse 应命中编码参数名（与遮蔽同源）');
     assert(r.enc.indexOf('GEZDGNBV') === -1, '编码参数名的 secret 必须被遮蔽');
-    assert(r.enc.indexOf('secret=\u2022\u2022') > 0, '遮蔽后应显示打码值');
+    assert(r.enc.indexOf('%73ecret=\u2022\u2022') > 0, '遮蔽后应显示打码值（参数名保留原始编码形态）');
     assert(r.dup.indexOf('AAAAAAA1') === -1 && r.dup.indexOf('BBBBBBB2') === -1, '重复 secret 两项都遮蔽');
     assertEq((r.dup.match(/secret=\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022/g) || []).length, 2, '两个 secret 参数各有打码');
     assert(r.dup.indexOf('digits=6') > 0, '其余参数保留');
     assert(r.pad.indexOf('GEZDGNBV') === -1 && r.pad.indexOf('\u2022\u2022\u2022\u2022') >= 0, '前后空白输入宽容处理');
+    // 复核 P3：非 secret 段保持原始编码形态（+ 不被重编码为 %2B/%20）
+    assert(r.keep.indexOf('issuer=Foo+Bar') > 0 && r.keep.indexOf('note=a+b') > 0, `非 secret 段应原样保留，实际 ${r.keep}`);
+    assert(r.keep.indexOf('GEZDGNBV') === -1, 'secret 仍被遮蔽');
   });
 
   await t('F19 vCard 边界：伪结束标记值/尾随垃圾/无冒号行拒绝；字面量反斜杠+n 正确反转义（PR #5 review P2）', async () => {
@@ -1942,12 +1946,20 @@ async function suiteG(h) {
     assertEq(await h.sw.evaluate(() => typeof self.Safety), 'undefined', 'SW 中不应存在 Safety 全局');
   });
 
-  await t('G7 userPass 宽口径锁定：仅用户名 userinfo（user@host）同样 danger（PR #5 review P2 采纳）', async () => {
+  await t('G7 userPass 宽口径锁定：仅用户名 userinfo（user@host）同样 danger；渲染文案覆盖仅用户名形态（PR #5 review P2 + 复核 P3）', async () => {
     const out = await assess(['https://user@example.com/', 'https://example.com@evil.com/']);
     for (let i = 0; i < out.length; i++) {
       assertEq(out[i].level, 'danger', `仅用户名形态 #${i + 1} 应为 danger（@ 仿冒手法）`);
       assertEq(out[i].reasons.join(), 'userPass', '命中 userPass');
     }
+    // 复核 P3：UI 实际渲染的原因文案须覆盖「仅用户名」形态（不再只以 user:pass@ 为例）
+    await goHome(page);
+    await page.setInputFiles('#file-input', path.join(TEST_DIR, 'safety', 'danger-userpass.png'));
+    await waitResults(page);
+    const bar = page.locator('.safety-bar.danger');
+    await bar.waitFor({ state: 'visible' });
+    await bar.locator('.link-btn').click();
+    assertEq(await bar.locator('.safety-reasons li').first().textContent(), msg('safety_reason_user_pass'), 'userPass 原因渲染文案');
   });
 
   await page.close().catch(() => {});

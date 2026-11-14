@@ -323,3 +323,12 @@ F/G 组 24 用例（F1–F17 含 F9b / G1–G6），全量 84 → 108，四轮�
 | P3 generateTotp/totpRemaining 未复用参数约束 | generateTotp 对 digits/period 非法值 reject（不静默吞默认）；totpRemaining 非法 period 按 30 兜底（显示函数不产 NaN） | F23 |
 
 review 采纳 +7 用例（F18–F23 / G7），F/G 24 → 31，全量 108 → 115，四轮全绿 115/115 ×4。
+
+#### 10.6.1 复核轮（2026-11-14，AIbot 复核 `31ec3ba`：上轮 11 项全部确认落实，无新 P1/P2；P3×2 采纳）
+
+| Review 点 | 处置 | 证据 |
+|---|---|---|
+| P3 maskSecrets 重建会重编码非 secret 参数（`issuer=Foo+Bar` → `Foo%20Bar`）并去首尾空白 | 改为**原始 query 段级替换**：只把解码后名为 secret（大小写宽容、编码名同源）的段替换为打码值，其余段 / path / 编码形态（含 `+`）与 fragment 全部原样保留；去首尾空白写入契约注释 | F18（`issuer=Foo+Bar`、`note=a+b` 原样断言） |
+| P3 userPass 文案仍以 `user:pass@` 为例，未覆盖仅用户名形态 | 中英文案改为「链接内嵌登录信息（用户名或密码，仿冒风险）」；G7 补 UI 实际渲染文案断言 | G7 |
+
+用例计数不变（F18/G7 原地扩充断言），全量维持 115。
