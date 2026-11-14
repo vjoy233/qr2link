@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>QR2Link</title>
+  <link rel="stylesheet" href="camera.css">
+</head>
+<body>
+
+  <header>
+    <div class="head-left">
+      <span class="app-name" data-i18n="appName"></span>
+      <span class="app-sub" data-i18n="cameraTitle"></span>
+    </div>
+    <!-- 设备选择器：仅在 enumerateDevices 报告多摄像头时显示（camera.js renderDevices） -->
+    <select id="camera-device" class="camera-select" hidden></select>
+  </header>
+
+  <main>
+    <div id="camera-stage">
+      <video id="camera-video" autoplay playsinline muted></video>
+      <!-- 权限拒绝 / 无设备 / 启动失败引导层（叠加于预览区；role=alert 即时播报） -->
+      <div id="camera-guide" role="alert" hidden>
+        <div id="camera-guide-text"></div>
+        <button id="camera-retry" class="wide-btn" hidden data-i18n="cameraRetry"></button>
+      </div>
+    </div>
+
+    <div id="camera-status" class="camera-status" role="status" aria-live="polite"></div>
+
+    <label class="camera-auto" for="camera-auto-open">
+      <input type="checkbox" id="camera-auto-open">
+      <span data-i18n="cameraAutoOpen"></span>
+    </label>
+
+    <!-- 命中横幅：结果原文 + 打开（仅 http/https）/ 复制 / 继续扫；
+         role=status 让屏幕阅读器播报状态变化（PR #7 AIbot review P3 采纳） -->
+    <div id="camera-banner" role="status" aria-live="polite" hidden>
+      <div id="camera-banner-text"></div>
+      <div class="camera-actions">
+        <button id="camera-open" class="mini-btn" data-i18n="btnOpen"></button>
+        <button id="camera-copy" class="mini-btn" data-i18n="btnCopy"></button>
+        <button id="camera-resume" class="mini-btn resume" data-i18n="cameraResume"></button>
+      </div>
+    </div>
+  </main>
+
+  <script src="../lib/jsQR.js"></script>
+  <script src="../lib/zxing-reader.js"></script>
+  <script src="../i18n.js"></script>
+  <script src="../qr.js"></script>
+  <script src="camera.js"></script>
+</body>
+</html>

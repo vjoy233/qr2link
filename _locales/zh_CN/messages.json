@@ -422,5 +422,65 @@
   "generate_download_failed": {
     "message": "下载失败，请重试",
     "description": "生成视图：PNG 导出异步失败的反馈"
+  },
+  "btn_camera": {
+    "message": "摄像头扫码",
+    "description": "主页入口：打开摄像头扫码标签页（V1.2-PLAN PR-4）"
+  },
+  "btn_camera_sub": {
+    "message": "打开摄像头，实时扫描",
+    "description": "主页摄像头入口副标题"
+  },
+  "camera_title": {
+    "message": "摄像头扫码",
+    "description": "摄像头页：头部副标题与页签标题"
+  },
+  "camera_device": {
+    "message": "选择摄像头",
+    "description": "摄像头页：设备选择器悬停提示"
+  },
+  "camera_starting": {
+    "message": "摄像头启动中…",
+    "description": "摄像头页：取流进行中的状态行"
+  },
+  "camera_scanning": {
+    "message": "请将二维码对准摄像头，将自动识别",
+    "description": "摄像头页：扫描进行中的状态行"
+  },
+  "camera_hit": {
+    "message": "已识别到内容",
+    "description": "摄像头页：命中后的状态行"
+  },
+  "camera_auto_open": {
+    "message": "识别后自动打开链接（仅本次会话有效）",
+    "description": "摄像头页：自动打开开关标签（默认关，不持久化）"
+  },
+  "camera_permission_denied": {
+    "message": "摄像头权限被拒绝。请点击地址栏左侧的权限图标，允许摄像头后重试",
+    "description": "摄像头页：权限拒绝引导"
+  },
+  "camera_no_device": {
+    "message": "未检测到可用的摄像头设备",
+    "description": "摄像头页：无设备引导"
+  },
+  "camera_start_failed": {
+    "message": "摄像头启动失败，请重试",
+    "description": "摄像头页：其他启动失败（如设备被占用）引导"
+  },
+  "camera_retry": {
+    "message": "重试",
+    "description": "摄像头页：引导层重试按钮"
+  },
+  "camera_resume": {
+    "message": "继续扫",
+    "description": "摄像头页：命中横幅的恢复扫描按钮"
+  },
+  "camera_stream_lost": {
+    "message": "摄像头连接已中断（设备拔出或权限被撤销），请重试",
+    "description": "摄像头页：运行中流中断（track ended）的引导"
+  },
+  "camera_unknown_device": {
+    "message": "摄像头",
+    "description": "摄像头页：设备无 label 时的本地化兜底名（后接序号）"
   }
 }

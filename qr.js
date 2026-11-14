@@ -5,6 +5,7 @@
  *   canUseNativeQr()                      运行时检测原生 BarcodeDetector 是否支持 qr_code
  *   parseHttpUrl(raw)                     仅接受 http/https 链接，其余返回 null（DESIGN §4.4）
  *   decodeImage(source, opts)             三阶段解码，引擎按阶段分档（V1.2-PLAN PR-1，见下）
+ *   decodeFrame(imageData)                摄像头帧单趟解码（V1.2-PLAN PR-4，见下方说明）
  *   getLastDecodeStats()                  最近一次 decodeImage 的阶段执行记录（测试/诊断探针，见下方说明）
  *
  * 引擎分档（zxing-wasm 引入后，V1.2-PLAN「zxing 性能基准」实测定档；PR #4 review 采纳：
@@ -368,25 +369,72 @@
       // 探针终值回写：zxingBroken 在本次解码中才置位时，初始快照会是 false，此处校正
       lastDecodeStats.zxingBroken = zxingBroken;
 
-      // 去重 + trim + 链接分类 + 码制归一（native/jsQR 恒 QRCode，zxing 为 canonical 名）
-      var seen = Object.create(null);
-      var results = [];
-      for (var i = 0; i < hits.length; i++) {
-        var t = (hits[i].text || '').trim();
-        if (!t || seen[t]) continue;
-        seen[t] = true;
-        results.push({ text: t, isUrl: !!parseHttpUrl(t), engine: hits[i].engine, format: hits[i].format || 'QRCode' });
-      }
-      return results;
+      return finalizeHits(hits);
     } finally {
       releaseImage(loaded); // 无论成败都释放 bitmap / 引用（DESIGN §6.6）
     }
+  }
+
+  // 命中数组 → 对外结果（去重 + trim + 链接分类 + 码制归一），decodeImage / decodeFrame 共用。
+  // native/jsQR 命中恒 'QRCode'；zxing 为 canonical 名（decodePass 已保证非空 text 才入列）
+  function finalizeHits(hits) {
+    var seen = Object.create(null);
+    var results = [];
+    for (var i = 0; i < hits.length; i++) {
+      var t = (hits[i].text || '').trim();
+      if (!t || seen[t]) continue;
+      seen[t] = true;
+      results.push({ text: t, isUrl: !!parseHttpUrl(t), engine: hits[i].engine, format: hits[i].format || 'QRCode' });
+    }
+    return results;
+  }
+
+  // ---- 摄像头帧单趟解码（V1.2-PLAN PR-4，B1；帧接缝为外部 review P1 采纳）----
+  // camera.js 的连续帧循环与 decodeImage 的静态图三阶段策略（降采样/像素预算/墙钟/象限
+  // 梯子）互不适用——摄像头帧 ≤1080p 小图，这里只跑单趟引擎链：
+  //   native → zxing 合并（与 decodePass 阶段 1 同构：native 仅 QR，不短路 zxing 防
+  //   混合码图丢 1D）→ 仍无命中时 jsQR 兜底（空结果接力）
+  // 差异于 decodePass：直接消费 ImageData（camera 侧已 drawImage + getImageData，无二次
+  // canvas 与缩放）；不写 lastDecodeStats（帧循环高频调用会冲掉静态图解码的诊断快照——
+  // 该探针是 decodeImage 的测试/诊断契约，产品逻辑不依赖，见上方说明）。
+  // 返回结构与 decodeImage 完全同构；帧数据仅内存处理（camera 契约：不落盘不上传）
+  async function decodeFrame(imageData) {
+    if (!imageData || !imageData.width || !imageData.height) return [];
+    var hits = [];
+
+    // ① 原生引擎：detect 直接收 ImageData（ImageBitmapSource 子类型），无需中间 canvas
+    if (await getNativeCheck()) {
+      try {
+        var detector = await getNativeDetector();
+        var codes = await detector.detect(imageData);
+        for (var i = 0; i < codes.length; i++) {
+          if (codes[i] && codes[i].rawValue) hits.push({ text: codes[i].rawValue, engine: 'native', format: 'QRCode' });
+        }
+      } catch (e) { /* 静默降级 */ }
+    }
+
+    // ② zxing（全码制，多码原生）：wasm 懒加载，首次帧才实例化
+    if (!zxingBroken && await initZxing()) {
+      var zxHits = await zxingRead(imageData);
+      for (var z = 0; z < zxHits.length; z++) hits.push(zxHits[z]);
+    }
+
+    // ③ jsQR 兜底（仅 QR）：无命中时执行（zxingBroken 时必然走到这里，应急路径）
+    if (hits.length === 0 && typeof jsQR === 'function') {
+      try {
+        var code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' });
+        if (code && code.data) hits.push({ text: code.data, engine: 'jsqr', format: 'QRCode' });
+      } catch (e) { /* jsQR 内部异常按无结果处理 */ }
+    }
+
+    return finalizeHits(hits);
   }
 
   window.QR2Link = {
     canUseNativeQr: canUseNativeQr,
     parseHttpUrl: parseHttpUrl,
     decodeImage: decodeImage,
+    decodeFrame: decodeFrame,
     getLastDecodeStats: function () { return lastDecodeStats; },
   };
 })();
