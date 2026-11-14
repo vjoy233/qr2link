@@ -178,6 +178,24 @@ function makeAssets() {
     for (const off of offsets) pdf += `${String(off).padStart(10, '0')} 00000 n \n`;
     pdf += `trailer\n<</Size ${objs.length + 1}/Root 1 0 R>>\nstartxref\n${xrefAt}\n%%EOF\n`;
     fs.writeFileSync(path.join(OUT_DIR, 'mini.pdf'), pdf, 'latin1');
+
+    // 摄像头「真机等价」MJPEG（PR-4 人工冒烟自动化补强，I11/I11b）：480×360 白底中央
+    // 300px QR 的单帧 JPEG × 15——喂给 --use-file-for-fake-video-capture 后作为假想采集
+    // 设备（按扩展名 .mjpeg 选中 MjpegFileParser：标准 JPEG 帧流、固定 30fps、EOF 自动
+    // 循环重播，源码「Reset the pointer to play repeatedly」）。帧内容 = 真实码图，经
+    // 完整媒体管线（getUserMedia → rVFC → drawImage → decodeFrame → 命中横幅）全程走
+    // 生产代码零注入；码内容用独立 URL，与 I3 注入的 normal.png 区分，证明命中确来自
+    // 实帧。不用 y4m：Chromium 的 Y4M 解析器有非标准定界（FRAME 恰 5 字节无换行、
+    // 头部需尾随空格），实测帧错位/设备不稳；MJPEG 路线为纯标准 JPEG 无此坑
+    {
+      const W = 480, H = 360, QR = 300, FRAMES = 15;
+      const qrBuf = await QRCode.toBuffer('https://example.com/qr2link-camera-live', { width: QR, margin: 2 });
+      const png = await sharp({
+        create: { width: W, height: H, channels: 3, background: '#ffffff' },
+      }).composite([{ input: qrBuf, left: (W - QR) / 2, top: (H - QR) / 2 }]).png().toBuffer();
+      const jpg = await sharp(png).jpeg({ quality: 92 }).toBuffer();
+      fs.writeFileSync(path.join(OUT_DIR, 'qr-camera.mjpeg'), Buffer.concat(Array(FRAMES).fill(jpg)));
+    }
   })();
 }
 
@@ -2456,7 +2474,7 @@ async function suiteH(h) {
   });
 }
 
-// ================= I：摄像头扫码（V1.2-PLAN PR-4，两层拆分——review P1 采纳） =================
+// ================= I：摄像头扫码（V1.2-PLAN PR-4，两层拆分——review P1 采纳 + 真机等价层） =================
 // 独立 fake media 变体 context（--use-fake-device-for-media-stream 绿球视频轨 +
 // --use-fake-ui-for-media-stream 权限自动授予）：
 //   真实链路层：getUserMedia 成功 / track 运行 / rVFC 持续出帧 / pagehide·
@@ -2464,10 +2482,12 @@ async function suiteH(h) {
 //   确定性解码层：fake 流无码，解码断言经 Camera.__testInjectFrame 注入 normal.png
 //   帧（与生产共用 decodeFrame 与 onHit 路径）（I3–I6）；
 //   错误路径用 addInitScript 钉死 getUserMedia 拒绝形态（I9/I10）
+// 真机等价层（人工冒烟自动化补强）：独立 MJPEG 变体 context，fake 采集设备的帧内容 =
+// 真实码图（qr-camera.mjpeg）→ 生产链路零注入自动命中 + 自动打开/继续扫（I11/I11b）
 
 async function suiteI() {
   currentGroup = 'I-CAMERA';
-  console.log('\n== I-CAMERA: 摄像头扫码（真实链路层 + 确定性解码层，fake media 变体） ==');
+  console.log('\n== I-CAMERA: 摄像头扫码（真实链路层 + 确定性解码层 + 真机等价 MJPEG 实帧，fake media 变体） ==');
 
   const NORMAL_URL = 'https://example.com/qr2link-test'; // test/normal.png 的码内容（gen-qr.mjs 锚定）
 
@@ -2477,9 +2497,10 @@ async function suiteI() {
     console.log(`扩展已加载（camera 变体）：${h.extId}`);
     const camUrl = `chrome-extension://${h.extId}/camera/camera.html`;
 
-    // camera 页：沿用 newPopup 的 pageerror 留痕（页面运行时错误进报告）
-    const newCamera = async () => {
-      const page = await openCameraTab(h);
+    // camera 页：沿用 newPopup 的 pageerror 留痕（页面运行时错误进报告）；默认 h，
+    // 真机等价层传自己的 y4m 变体 context
+    const newCamera = async (hh = h) => {
+      const page = await openCameraTab(hh);
       page.on('pageerror', (e) => pageErrors.push({ url: page.url(), err: String(e) }));
       return page;
     };
@@ -2670,6 +2691,48 @@ async function suiteI() {
       assert(await page.locator('#camera-retry').isHidden(), '无设备不提供重试');
       await page.close().catch(() => {});
     });
+
+    // ---- 真机等价层（I11/I11b，PR-4 人工冒烟自动化补强）----
+    // 独立 MJPEG 变体 context：fake 采集设备的帧内容 = 真实码图（qr-camera.mjpeg），
+    // 命中完全由生产代码（rVFC → drawImage → decodeFrame → onHit）产生，全程零
+    // __testInjectFrame 注入——与「物理摄像头扫实体码」的差异只剩物理采集层
+    const mjpeg = path.join(OUT_DIR, 'qr-camera.mjpeg');
+    const LIVE_URL = 'https://example.com/qr2link-camera-live';
+    let hv;
+    try {
+      hv = await launch({ channel: CHANNEL, lang: LANG, videoFile: mjpeg });
+      console.log(`扩展已加载（真机等价 MJPEG 变体）：${hv.extId}`);
+
+      await t('I11 真机等价（MJPEG 实帧）：采集设备输出真实码图 → 生产链路自动命中横幅（零注入，人工冒烟「摄像头真机」的软件全链路等价）', async () => {
+        const page = await newCamera(hv);
+        const st = await waitStats(page, (s) => s.hits >= 1 && !s.scanning, 20000, '实帧命中');
+        assert(st.framesSeen >= 1 && st.framesSubmitted >= 1 && st.framesDecoded >= 1,
+          `命中须经完整生产管线（seen=${st.framesSeen}, submitted=${st.framesSubmitted}, decoded=${st.framesDecoded}）`);
+        assertEq(await page.locator('#camera-banner-text').textContent(), LIVE_URL, '横幅文本 = 实帧码内容');
+        assertEq(await page.locator('#camera-status').textContent(), msg('camera_hit'), '命中状态行');
+        assert(await page.locator('#camera-open').isVisible(), 'URL 命中显示打开');
+        const vw = await page.evaluate(() => document.querySelector('#camera-video').videoWidth);
+        assertEq(vw, 480, '视频轨来自 MJPEG 采集设备（480×360）');
+        await page.close().catch(() => {});
+      });
+
+      await t('I11b 真机等价·自动打开与继续扫：开关开 → 继续扫 → 实帧再次命中并自动开页（hits 递增）', async () => {
+        const page = await newCamera(hv);
+        await waitStats(page, (s) => s.hits >= 1, 20000, '首次实帧命中');
+        await page.locator('#camera-auto-open').check();
+        const [opened] = await Promise.all([
+          hv.context.waitForEvent('page', { timeout: 20000 }),
+          page.locator('#camera-resume').click(),
+        ]);
+        await opened.waitForURL(/example\.com\/qr2link-camera-live/, { timeout: 8000 });
+        const st = await waitStats(page, (s) => s.hits >= 2 && !s.scanning, 20000, '继续扫后实帧再次命中');
+        assertEq(st.hits, 2, '继续扫后应再次命中并停循环');
+        await opened.close().catch(() => {});
+        await page.close().catch(() => {});
+      });
+    } finally {
+      if (hv) await hv.close().catch(() => {});
+    }
   } finally {
     if (h) await h.close().catch(() => {});
   }
