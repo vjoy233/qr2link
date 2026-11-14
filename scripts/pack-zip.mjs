@@ -18,7 +18,7 @@ const version = manifest.version;
 
 const INCLUDE = [
   'manifest.json', '_locales', 'background.js', 'offscreen.html', 'offscreen.js',
-  'qr.js', 'i18n.js', 'popup', 'lib', 'icons',
+  'qr.js', 'i18n.js', 'parsers.js', 'safety.js', 'popup', 'lib', 'icons',
 ];
 const distDir = path.join(root, 'dist');
 const zipName = `qr2link-v${version}.zip`;

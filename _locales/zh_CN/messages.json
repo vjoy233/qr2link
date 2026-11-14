@@ -123,6 +123,202 @@
     "message": "文本",
     "description": "非 URL 结果的 meta 标签"
   },
+  "parse_kind_wifi": {
+    "message": "Wi-Fi 网络",
+    "description": "结构化卡片标题：WIFI: 二维码"
+  },
+  "parse_kind_otp": {
+    "message": "一次性验证码（OTP）",
+    "description": "结构化卡片标题：otpauth:// 二维码"
+  },
+  "parse_kind_vcard": {
+    "message": "联系人",
+    "description": "结构化卡片标题：vCard 二维码"
+  },
+  "parse_kind_tel": {
+    "message": "电话",
+    "description": "结构化卡片标题：tel: 二维码"
+  },
+  "parse_kind_sms": {
+    "message": "短信",
+    "description": "结构化卡片标题：sms: 二维码"
+  },
+  "parse_kind_mail": {
+    "message": "邮件",
+    "description": "结构化卡片标题：mailto: 二维码"
+  },
+  "parse_kind_geo": {
+    "message": "位置",
+    "description": "结构化卡片标题：geo: 二维码"
+  },
+  "parse_wifi_ssid": {
+    "message": "网络名称（SSID）",
+    "description": "WIFI 卡片字段：SSID"
+  },
+  "parse_wifi_auth": {
+    "message": "加密方式",
+    "description": "WIFI 卡片字段：认证类型"
+  },
+  "parse_wifi_pass": {
+    "message": "密码",
+    "description": "WIFI 卡片字段：密码"
+  },
+  "parse_wifi_hidden": {
+    "message": "隐藏网络",
+    "description": "WIFI 卡片字段：是否隐藏 SSID"
+  },
+  "parse_wifi_auth_none": {
+    "message": "无密码（开放）",
+    "description": "WIFI 卡片：T=nopass 时的加密方式显示值"
+  },
+  "parse_yes": {
+    "message": "是",
+    "description": "布尔字段显示值：真"
+  },
+  "parse_no": {
+    "message": "否",
+    "description": "布尔字段显示值：假"
+  },
+  "parse_otp_code": {
+    "message": "当前验证码",
+    "description": "OTP 卡片：TOTP 动态码标签"
+  },
+  "parse_otp_issuer": {
+    "message": "服务",
+    "description": "OTP 卡片字段：签发方"
+  },
+  "parse_otp_account": {
+    "message": "账户",
+    "description": "OTP 卡片字段：账户名"
+  },
+  "parse_otp_secret": {
+    "message": "密钥",
+    "description": "OTP 卡片字段：Base32 密钥（默认打码）"
+  },
+  "parse_otp_algorithm": {
+    "message": "算法",
+    "description": "OTP 卡片字段：HMAC 算法"
+  },
+  "parse_otp_digits": {
+    "message": "位数",
+    "description": "OTP 卡片字段：验证码位数"
+  },
+  "parse_otp_period": {
+    "message": "周期（秒）",
+    "description": "OTP 卡片字段：TOTP 周期秒数"
+  },
+  "parse_otp_counter": {
+    "message": "计数器",
+    "description": "OTP 卡片字段：HOTP 计数器"
+  },
+  "parse_otp_hotp_hint": {
+    "message": "HOTP 型验证码仅展示参数，不在此生成动态码",
+    "description": "OTP 卡片提示：HOTP 不生成（拍板①）"
+  },
+  "parse_show_secret": {
+    "message": "显示",
+    "description": "密钥打码切换：显示明文"
+  },
+  "parse_hide_secret": {
+    "message": "隐藏",
+    "description": "密钥打码切换：恢复打码"
+  },
+  "parse_vcard_name": {
+    "message": "姓名",
+    "description": "vCard 卡片字段"
+  },
+  "parse_vcard_tel": {
+    "message": "电话",
+    "description": "vCard 卡片字段（可多行）"
+  },
+  "parse_vcard_email": {
+    "message": "邮箱",
+    "description": "vCard 卡片字段（可多行）"
+  },
+  "parse_vcard_org": {
+    "message": "公司",
+    "description": "vCard 卡片字段"
+  },
+  "parse_vcard_title": {
+    "message": "职位",
+    "description": "vCard 卡片字段"
+  },
+  "btn_download_vcf": {
+    "message": "下载 .vcf",
+    "description": "vCard 卡片操作：下载联系人文件"
+  },
+  "parse_tel_number": {
+    "message": "号码",
+    "description": "tel/sms 卡片字段：号码"
+  },
+  "parse_sms_body": {
+    "message": "短信内容",
+    "description": "sms 卡片字段：预填内容"
+  },
+  "parse_mail_to": {
+    "message": "收件人",
+    "description": "mailto 卡片字段"
+  },
+  "parse_mail_subject": {
+    "message": "主题",
+    "description": "mailto 卡片字段"
+  },
+  "parse_mail_body": {
+    "message": "正文",
+    "description": "mailto 卡片字段"
+  },
+  "parse_geo_lat": {
+    "message": "纬度",
+    "description": "geo 卡片字段"
+  },
+  "parse_geo_lon": {
+    "message": "经度",
+    "description": "geo 卡片字段"
+  },
+  "safety_level_ok": {
+    "message": "链接正常",
+    "description": "安全指示条：未命中任何风险规则"
+  },
+  "safety_level_caution": {
+    "message": "谨慎访问",
+    "description": "安全指示条：命中 caution 级规则"
+  },
+  "safety_level_danger": {
+    "message": "高风险链接",
+    "description": "安全指示条：命中 danger 级规则"
+  },
+  "safety_reason_idn": {
+    "message": "域名混排多种文字（疑似同形仿冒）",
+    "description": "风险原因：punycode 解码后混排拉丁/西里尔/希腊字母"
+  },
+  "safety_reason_user_pass": {
+    "message": "链接内嵌账号密码（user:pass@）",
+    "description": "风险原因：URL 含凭据"
+  },
+  "safety_reason_http": {
+    "message": "HTTP 明文连接，内容可被窥探",
+    "description": "风险原因：非 https"
+  },
+  "safety_reason_ip": {
+    "message": "IP 地址直连（内网或本机地址）",
+    "description": "风险原因：主机为 IP 字面量（含私网/回环段，统一归此类）"
+  },
+  "safety_reason_short": {
+    "message": "短链接，真实目的地未知",
+    "description": "风险原因：已知短链域名"
+  },
+  "safety_confirm_open": {
+    "message": "确认打开？",
+    "description": "danger 级两段式确认：打开按钮的翻转态（拍板⑦）"
+  },
+  "safety_show_reasons": {
+    "message": "原因",
+    "description": "安全指示条：展开风险原因列表"
+  },
+  "safety_hide_reasons": {
+    "message": "收起",
+    "description": "安全指示条：收起风险原因列表"
+  },
   "history_title": {
     "message": "最近识别",
     "description": "历史面板标题"

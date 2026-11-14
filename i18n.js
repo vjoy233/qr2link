@@ -26,6 +26,22 @@
     'errImageDecode', 'errFetchImage', 'btnRetryCrop',
     // 结果卡片
     'btnOpen', 'btnCopy', 'btnKeep', 'copied', 'copyFailed', 'kept', 'textLabel',
+    // 结构化解析卡片（V1.2-PLAN PR-2，C1）
+    'parseKindWifi', 'parseKindOtp', 'parseKindVcard', 'parseKindTel', 'parseKindSms',
+    'parseKindMail', 'parseKindGeo',
+    'parseWifiSsid', 'parseWifiAuth', 'parseWifiPass', 'parseWifiHidden', 'parseWifiAuthNone',
+    'parseYes', 'parseNo',
+    'parseOtpCode', 'parseOtpIssuer', 'parseOtpAccount', 'parseOtpSecret', 'parseOtpAlgorithm',
+    'parseOtpDigits', 'parseOtpPeriod', 'parseOtpCounter', 'parseOtpHotpHint',
+    'parseShowSecret', 'parseHideSecret',
+    'parseVcardName', 'parseVcardTel', 'parseVcardEmail', 'parseVcardOrg', 'parseVcardTitle',
+    'btnDownloadVcf',
+    'parseTelNumber', 'parseSmsBody', 'parseMailTo', 'parseMailSubject', 'parseMailBody',
+    'parseGeoLat', 'parseGeoLon',
+    // 安全预检指示条（V1.2-PLAN PR-2，C2）
+    'safetyLevelOk', 'safetyLevelCaution', 'safetyLevelDanger',
+    'safetyReasonIdn', 'safetyReasonUserPass', 'safetyReasonHttp', 'safetyReasonIp',
+    'safetyReasonShort', 'safetyConfirmOpen', 'safetyShowReasons', 'safetyHideReasons',
     // 历史
     'historyTitle', 'historyOff', 'historyEmpty', 'historyClear',
     'historyClearConfirm', 'historyDelete',

@@ -28,6 +28,7 @@
     lastResults: null,
     history: { enabled: false, items: [] },
     clearArmed: null,   // 清空历史两步确认的定时器
+    totpTimers: [],     // TOTP 卡片的 setInterval 句柄（重渲染 / 离开结果视图时清理）
   };
 
   function $(id) { return document.getElementById(id); }
@@ -53,6 +54,7 @@
     for (var i = 0; i < VIEWS.length; i++) {
       $(('view-' + VIEWS[i])).hidden = VIEWS[i] !== name;
     }
+    if (name !== 'results') clearTotpTimers(); // TOTP 倒计时随视图切换清理（V1.2-PLAN PR-2）
     if (name === 'home') {
       document.body.dataset.mode = 'compact';
       resetWorkImage();
@@ -158,7 +160,214 @@
     });
   }
 
-  // ---------------- 结果渲染（一律 textContent） ----------------
+  // ---------------- 结果渲染（一律 textContent；V1.2-PLAN PR-2：结构化卡片 + 安全预检） ----------------
+
+  // kind → 卡片标题（直接引用保持 check-locales 静态闭包可校验，不走 computed access）
+  var KIND_TITLES = {
+    wifi: T.parseKindWifi, totp: T.parseKindOtp, hotp: T.parseKindOtp,
+    vcard: T.parseKindVcard, tel: T.parseKindTel, sms: T.parseKindSms,
+    mailto: T.parseKindMail, geo: T.parseKindGeo,
+  };
+
+  function parsedRow(label, valueEl) {
+    var row = document.createElement('div');
+    row.className = 'parsed-row';
+    var l = document.createElement('span');
+    l.className = 'parsed-label';
+    l.textContent = label;
+    row.appendChild(l);
+    if (valueEl) row.appendChild(valueEl);
+    return row;
+  }
+
+  function parsedVal(text) {
+    var s = document.createElement('span');
+    s.className = 'parsed-value';
+    s.textContent = text;
+    return s;
+  }
+
+  // 密钥默认打码、点击切换（与结果原文/历史行同款哲学：显示层打码，复制取原文）
+  var SECRET_MASK = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022'; // 与 parsers.js maskSecrets 同款 •×8
+  function secretValueWithToggle(secret) {
+    var wrap = document.createElement('span');
+    wrap.className = 'parsed-secret';
+    var val = document.createElement('span');
+    val.className = 'parsed-value secret-value';
+    val.textContent = SECRET_MASK;
+    var btn = document.createElement('button');
+    btn.className = 'mini-btn';
+    btn.textContent = T.parseShowSecret;
+    var shown = false;
+    btn.addEventListener('click', function () {
+      shown = !shown;
+      val.textContent = shown ? secret : SECRET_MASK;
+      btn.textContent = shown ? T.parseHideSecret : T.parseShowSecret;
+    });
+    wrap.appendChild(val);
+    wrap.appendChild(btn);
+    return wrap;
+  }
+
+  function clearTotpTimers() {
+    for (var i = 0; i < state.totpTimers.length; i++) clearInterval(state.totpTimers[i]);
+    state.totpTimers = [];
+  }
+
+  // TOTP 动态码：每秒刷新（重算 HMAC 代价微小，天然跨周期换码）+ 剩余秒倒计时
+  function scheduleTotp(card, parsed) {
+    var codeEl = card.querySelector('.otp-code');
+    var cdEl = card.querySelector('.otp-countdown');
+    if (!codeEl || !cdEl) return;
+    var tick = function () {
+      var now = Date.now();
+      Parsers.generateTotp(parsed.secret, parsed, now).then(function (code) {
+        if (codeEl.isConnected) codeEl.textContent = code; // 卡片已被重渲染时静默丢弃
+      }, function () { /* Bad secret 不应发生（parse 已校验） */ });
+      cdEl.textContent = Parsers.totpRemaining(parsed.period, now) + 's';
+    };
+    tick();
+    state.totpTimers.push(setInterval(tick, 1000));
+  }
+
+  function renderParsedCard(r) {
+    var p = Parsers.parse(r.text);
+    if (!p) return null; // 解析失败/不支持 → 调用方回落纯文本卡片（锁定契约）
+    var card = document.createElement('div');
+    card.className = 'parsed-card';
+    card.dataset.kind = p.kind;
+    var title = document.createElement('div');
+    title.className = 'parsed-title';
+    title.textContent = KIND_TITLES[p.kind] || T.textLabel;
+    card.appendChild(title);
+
+    if (p.kind === 'wifi') {
+      card.appendChild(parsedRow(T.parseWifiSsid, parsedVal(p.ssid)));
+      card.appendChild(parsedRow(T.parseWifiAuth, parsedVal(p.auth === 'nopass' ? T.parseWifiAuthNone : p.auth)));
+      if (p.password != null) {
+        var passRow = parsedRow(T.parseWifiPass, parsedVal(p.password));
+        var copyPass = document.createElement('button');
+        copyPass.className = 'mini-btn';
+        copyPass.textContent = T.btnCopy;
+        copyPass.addEventListener('click', function () { copyText(p.password, copyPass); });
+        passRow.appendChild(copyPass);
+        card.appendChild(passRow);
+      }
+      card.appendChild(parsedRow(T.parseWifiHidden, parsedVal(p.hidden ? T.parseYes : T.parseNo)));
+    } else if (p.kind === 'totp' || p.kind === 'hotp') {
+      if (p.kind === 'totp') {
+        // 大号动态码 + 倒计时 + 复制（拍板①：WebCrypto 本地生成）
+        var otpRow = document.createElement('div');
+        otpRow.className = 'otp-row';
+        var codeEl = document.createElement('span');
+        codeEl.className = 'otp-code';
+        codeEl.textContent = '······'.slice(0, p.digits);
+        var cdEl = document.createElement('span');
+        cdEl.className = 'otp-countdown';
+        var copyCode = document.createElement('button');
+        copyCode.className = 'mini-btn';
+        copyCode.textContent = T.btnCopy;
+        copyCode.addEventListener('click', function () {
+          // 重算当前时刻的码再复制（与展示同源，避免占位符/跨秒时刻差）
+          Parsers.generateTotp(p.secret, p, Date.now()).then(function (code) { copyText(code, copyCode); });
+        });
+        otpRow.appendChild(codeEl);
+        otpRow.appendChild(cdEl);
+        otpRow.appendChild(copyCode);
+        card.appendChild(otpRow);
+      } else {
+        var hint = document.createElement('div');
+        hint.className = 'parsed-hint';
+        hint.textContent = T.parseOtpHotpHint;
+        card.appendChild(hint);
+      }
+      if (p.issuer) card.appendChild(parsedRow(T.parseOtpIssuer, parsedVal(p.issuer)));
+      if (p.account) card.appendChild(parsedRow(T.parseOtpAccount, parsedVal(p.account)));
+      card.appendChild(parsedRow(T.parseOtpSecret, secretValueWithToggle(p.secret)));
+      card.appendChild(parsedRow(T.parseOtpAlgorithm, parsedVal(p.algorithm)));
+      card.appendChild(parsedRow(T.parseOtpDigits, parsedVal(String(p.digits))));
+      if (p.kind === 'totp') card.appendChild(parsedRow(T.parseOtpPeriod, parsedVal(String(p.period) + 's')));
+      else card.appendChild(parsedRow(T.parseOtpCounter, parsedVal(String(p.counter))));
+    } else if (p.kind === 'vcard') {
+      if (p.fn) card.appendChild(parsedRow(T.parseVcardName, parsedVal(p.fn)));
+      for (var t = 0; t < p.tels.length; t++) card.appendChild(parsedRow(T.parseVcardTel, parsedVal(p.tels[t])));
+      for (var e = 0; e < p.emails.length; e++) card.appendChild(parsedRow(T.parseVcardEmail, parsedVal(p.emails[e])));
+      if (p.org) card.appendChild(parsedRow(T.parseVcardOrg, parsedVal(p.org)));
+      if (p.title) card.appendChild(parsedRow(T.parseVcardTitle, parsedVal(p.title)));
+      // 下载 .vcf：data-URI anchor（原文即二维码解码文本；不经过任何 HTML 解析）
+      var dl = document.createElement('a');
+      dl.className = 'mini-btn';
+      dl.textContent = T.btnDownloadVcf;
+      dl.setAttribute('download', 'contact.vcf');
+      dl.setAttribute('href', 'data:text/vcard;charset=utf-8,' + encodeURIComponent(p.raw));
+      var dlRow = document.createElement('div');
+      dlRow.className = 'parsed-actions';
+      dlRow.appendChild(dl);
+      card.appendChild(dlRow);
+    } else if (p.kind === 'tel') {
+      card.appendChild(parsedRow(T.parseTelNumber, parsedVal(p.number)));
+    } else if (p.kind === 'sms') {
+      card.appendChild(parsedRow(T.parseTelNumber, parsedVal(p.number)));
+      if (p.body != null) card.appendChild(parsedRow(T.parseSmsBody, parsedVal(p.body)));
+    } else if (p.kind === 'mailto') {
+      card.appendChild(parsedRow(T.parseMailTo, parsedVal(p.to)));
+      if (p.subject != null) card.appendChild(parsedRow(T.parseMailSubject, parsedVal(p.subject)));
+      if (p.body != null) card.appendChild(parsedRow(T.parseMailBody, parsedVal(p.body)));
+    } else if (p.kind === 'geo') {
+      card.appendChild(parsedRow(T.parseGeoLat, parsedVal(String(p.lat))));
+      card.appendChild(parsedRow(T.parseGeoLon, parsedVal(String(p.lon))));
+    }
+
+    if (p.kind === 'totp') scheduleTotp(card, p);
+    return card;
+  }
+
+  // ---------------- 安全指示条（C2：纯本地启发式；danger 见两段式打开） ----------------
+  // 枚举 key → i18n 文案（直接引用，保持静态闭包可校验）
+  var SAFETY_LEVELS = { ok: T.safetyLevelOk, caution: T.safetyLevelCaution, danger: T.safetyLevelDanger };
+  var SAFETY_REASONS = {
+    idnHomograph: T.safetyReasonIdn,
+    userPass: T.safetyReasonUserPass,
+    httpPlain: T.safetyReasonHttp,
+    ipHost: T.safetyReasonIp,
+    shortLink: T.safetyReasonShort,
+  };
+
+  function renderSafetyBar(rawUrl) {
+    var a = window.Safety.assessUrl(rawUrl);
+    var bar = document.createElement('div');
+    bar.className = 'safety-bar ' + a.level;
+    bar.dataset.level = a.level;
+    var dot = document.createElement('span');
+    dot.className = 'safety-dot';
+    dot.setAttribute('aria-hidden', 'true');
+    var level = document.createElement('span');
+    level.className = 'safety-level';
+    level.textContent = SAFETY_LEVELS[a.level] || '';
+    bar.appendChild(dot);
+    bar.appendChild(level);
+    if (a.reasons.length) {
+      var list = document.createElement('ul');
+      list.className = 'safety-reasons';
+      list.hidden = true;
+      for (var i = 0; i < a.reasons.length; i++) {
+        var li = document.createElement('li');
+        li.textContent = SAFETY_REASONS[a.reasons[i]] || a.reasons[i];
+        list.appendChild(li);
+      }
+      var toggle = document.createElement('button');
+      toggle.className = 'link-btn';
+      toggle.textContent = T.safetyShowReasons;
+      toggle.addEventListener('click', function () {
+        list.hidden = !list.hidden;
+        toggle.textContent = list.hidden ? T.safetyShowReasons : T.safetyHideReasons;
+      });
+      bar.appendChild(toggle);
+      bar.appendChild(list);
+    }
+    return bar;
+  }
+
   function resultActions(r) {
     var box = document.createElement('div');
     box.className = 'result-actions';
@@ -166,7 +375,29 @@
       var open = document.createElement('button');
       open.className = 'mini-btn';
       open.textContent = T.btnOpen;
-      open.addEventListener('click', function () { openUrl(r.text); });
+      var assess = r.isUrl ? window.Safety.assessUrl(r.text) : null;
+      if (assess && assess.level === 'danger') {
+        // 拍板⑦：danger 级两段式确认（复用 history-clear 的 3s 解除模式；caution/ok 一键直开）
+        var armed = null; // 定时器句柄即 armed 态
+        var disarm = function () {
+          if (armed) clearTimeout(armed);
+          armed = null;
+          open.textContent = T.btnOpen;
+          open.classList.remove('danger-armed');
+        };
+        open.addEventListener('click', function () {
+          if (armed) {
+            disarm();
+            openUrl(r.text); // 3 秒内二次点击 = 确认打开
+            return;
+          }
+          open.textContent = T.safetyConfirmOpen;
+          open.classList.add('danger-armed');
+          armed = setTimeout(disarm, 3000);
+        });
+      } else {
+        open.addEventListener('click', function () { openUrl(r.text); });
+      }
       box.appendChild(open);
     }
     var copy = document.createElement('button');
@@ -185,6 +416,7 @@
   }
 
   function renderResults(results) {
+    clearTotpTimers(); // 重渲染前先清旧倒计时（历史开关联动会重复进入）
     var list = $('result-list');
     list.textContent = '';
     for (var i = 0; i < results.length; i++) {
@@ -209,10 +441,17 @@
         meta.textContent = metaText;
         var text = document.createElement('div');
         text.className = 'result-text';
-        text.textContent = r.text; // trim 后原始文本（qr.js 已处理）
-        text.title = r.text;       // 悬浮显示全文
+        // 显示层打码（V1.2-PLAN PR-2 review P1）：otpauth 的 secret= 显示 ••；复制/保留仍取 r.text 原文
+        var display = Parsers.maskSecrets(r.text);
+        text.textContent = display;
+        text.title = display;
         body.appendChild(meta);
         body.appendChild(text);
+        // 结构化卡片（C1）：命中即在原文下追加（渲染全 textContent；失败返回 null 不追加）
+        var parsedCard = renderParsedCard(r);
+        if (parsedCard) body.appendChild(parsedCard);
+        // 安全指示条（C2）：仅 http(s) 卡片；danger 级「打开」走两段式（resultActions）
+        if (r.isUrl) body.appendChild(renderSafetyBar(r.text));
         card.appendChild(body);
         card.appendChild(resultActions(r));
         list.appendChild(card);
@@ -273,9 +512,20 @@
     row.className = 'history-item';
     var text = document.createElement('span');
     text.className = 'history-text';
-    text.textContent = item.text;
-    text.title = item.text;
+    // otpauth 的 secret= 显示层打码（存储/复制保持原文）；「显示」按钮切换明文（review P1）
+    var masked = Parsers.maskSecrets(item.text);
+    text.textContent = masked;
+    text.title = masked;
     row.appendChild(text);
+    if (masked !== item.text) {
+      var reveal = miniAction(T.parseShowSecret, function () {
+        var shown = text.textContent === masked ? item.text : masked;
+        text.textContent = shown;
+        text.title = shown;
+        reveal.textContent = shown === masked ? T.parseShowSecret : T.parseHideSecret;
+      });
+      row.appendChild(reveal);
+    }
     if (item.isUrl) {
       row.appendChild(miniAction(T.btnOpen, function () { openUrl(item.text); }));
     }

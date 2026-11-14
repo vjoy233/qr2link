@@ -1,6 +1,6 @@
 # QR2Link Privacy Policy
 
-Last updated: 2026-11-05
+Last updated: 2026-11-14
 
 [中文](PRIVACY.md) | English
 
@@ -21,6 +21,7 @@ When you use the right-click "Scan QR code in image" action on a remote image, t
 - The history feature is **off by default**;
 - Once enabled, a **text result** is saved to local `chrome.storage.local` (≤20 entries, **no images**) only when you explicitly click "Keep" on a result card;
 - History entries may contain sensitive values such as login URLs, invite links, or authorization codes — mind what you keep;
+- One-time-password contents (otpauth://) include the service secret key: once kept, the secret is **stored verbatim in local history**, while the UI only masks it at the display layer (click "Show" to reveal; copying uses the original). Live codes are computed locally by the browser's built-in WebCrypto and never uploaded;
 - **Clearing your browser history does not clear this storage.** To delete entries, use the per-item "Delete" or the "Clear" button in the "Recent scans" area of the popup; uninstalling the extension also wipes it.
 
 ### 4. Clipboard: images only, read only on request, never written automatically
