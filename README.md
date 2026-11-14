@@ -132,7 +132,7 @@ npm run check:locales     # _locales 完整性校验（key 奇偶/引用闭包/m
 
 ### 自动化验收（test/e2e）
 
-Playwright 驱动真实浏览器加载未打包扩展跑 141 条验收用例（DESIGN §8 的可自动化子集），同一套用例支持中英双语回归（断言文案与 `_locales` 同源）：
+Playwright 驱动真实浏览器加载未打包扩展跑 143 条验收用例（DESIGN §8 的可自动化子集），同一套用例支持中英双语回归（断言文案与 `_locales` 同源）：
 
 ```bash
 cd test/e2e
@@ -142,7 +142,7 @@ QR2LINK_E2E_LANG=en-US NODE_PATH="$(npm root -g)" node run-all.cjs chromium  # �
 ```
 
 - 品牌版 Chrome 137+ 已移除 `--load-extension`，自动化请在 Edge / Playwright Chromium 跑；Chrome 手工项见 `TEST-RESULTS.md` §6
-- 套件涉及真实 OS 键盘注入（Alt+Shift+S）与系统剪贴板读写，会短暂抢占前台窗口；摄像头用例使用 Chromium fake media 设备（无需真实摄像头）
+- 套件涉及真实 OS 键盘注入（Alt+Shift+S）与系统剪贴板读写，会短暂抢占前台窗口；摄像头用例使用 Chromium fake media 设备（无需真实摄像头），其中「真机等价」用例以 MJPEG 文件作为采集设备内容源（帧 = 真实码图，经完整生产链路零注入命中）
 - 报告输出至 `test/e2e/report/`；run-all 前置门禁为 `check-locales` + `vendor-sync`；实测结论见 [TEST-RESULTS.md](TEST-RESULTS.md)
 
 ## 设计文档

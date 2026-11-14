@@ -132,7 +132,7 @@ Debug entry points: right-click inside the popup → Inspect; "service worker" o
 
 ### Automated acceptance (test/e2e)
 
-Playwright drives a real browser with the unpacked extension loaded — 141 acceptance cases (the automatable subset of DESIGN §8):
+Playwright drives a real browser with the unpacked extension loaded — 143 acceptance cases (the automatable subset of DESIGN §8):
 
 ```bash
 cd test/e2e
@@ -142,7 +142,7 @@ QR2LINK_E2E_LANG=en-US NODE_PATH="$(npm root -g)" node run-all.cjs chromium # En
 ```
 
 - Branded Chrome 137+ dropped `--load-extension`; run automation on Edge / Playwright Chromium. Manual Chrome items: `TEST-RESULTS.md` §6
-- The suite injects real OS key events (Alt+Shift+S) and reads/writes the system clipboard — it briefly takes over the foreground window; camera cases use Chromium's fake media device (no physical camera needed)
+- The suite injects real OS key events (Alt+Shift+S) and reads/writes the system clipboard — it briefly takes over the foreground window; camera cases use Chromium's fake media device (no physical camera needed), including a "real-device equivalent" pair that feeds a real QR image through the full production pipeline via an MJPEG file capture device
 - Reports land in `test/e2e/report/`; run-all step-0 gates are `check-locales` + `vendor-sync`; measured results: [TEST-RESULTS.md](TEST-RESULTS.md)
 
 ## Design docs
