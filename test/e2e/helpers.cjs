@@ -28,7 +28,7 @@ const REPORT_DIR = __dirname;
 
 // ---------------- 浏览器启动 ----------------
 
-async function launch({ channel = 'chrome', headless = false, lang } = {}) {
+async function launch({ channel = 'chrome', headless = false, lang, fakeMedia = false } = {}) {
   // 目录名含 MARKER：oskeys.ps1 靠它在进程命令行中定位本自动化实例的主窗口，
   // 避免前台化用户自己开着的浏览器。
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), `qr2link-${channel}-QR2LINK-E2E-MARKER-`));
@@ -47,6 +47,13 @@ async function launch({ channel = 'chrome', headless = false, lang } = {}) {
       // example.com → 本机 https（见 serveStatic），消除真实网络依赖与 DNS 黑洞
       '--host-resolver-rules=MAP example.com 127.0.0.2',
       '--ignore-certificate-errors',
+      // I 组摄像头变体（V1.2-PLAN PR-4）：fake 设备（绿球视频轨）+ fake UI（权限
+      // 自动授予，无弹窗）——真实链路层（getUserMedia/track/rVFC）由此走通；
+      // fake 流无码，解码断言走确定性解码层（Camera.__testInjectFrame 注入帧）
+      ...(fakeMedia ? [
+        '--use-fake-device-for-media-stream',
+        '--use-fake-ui-for-media-stream',
+      ] : []),
     ],
   });
   // 离线确定性：example.com 经 --host-resolver-rules 落到本机 https 服务（serveStatic 的
@@ -82,6 +89,17 @@ async function openPopupTab(h) {
   const page = await h.context.newPage();
   await page.goto(`chrome-extension://${h.extId}/popup/popup.html`);
   await page.waitForSelector('#view-home', { state: 'visible', timeout: 5000 });
+  return page;
+}
+
+/**
+ * camera 页以普通标签页打开（I 组，V1.2-PLAN PR-4；popup 入口 chrome.tabs.create 的
+ * 目标页）。页面加载即自动取流——须在 fakeMedia 变体的 context 上使用。
+ */
+async function openCameraTab(h) {
+  const page = await h.context.newPage();
+  await page.goto(`chrome-extension://${h.extId}/camera/camera.html`);
+  await page.waitForSelector('#camera-video', { state: 'attached', timeout: 5000 });
   return page;
 }
 
@@ -210,7 +228,7 @@ function msg(key, lang = uiLang()) {
 
 module.exports = {
   pw, EXT_DIR, TEST_DIR, REPORT_DIR,
-  launch, openPopupTab, tryOpenRealPopup, serveStatic,
+  launch, openPopupTab, openCameraTab, tryOpenRealPopup, serveStatic,
   setClipboard, osSendKeys, sleep,
   uiLang, msg,
 };

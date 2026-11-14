@@ -40,11 +40,11 @@
   <h2>边界样例</h2>
   <figure>
     <img src="two-codes.png" alt="双二维码" width="320">
-    <figcaption>two-codes.png — 一图两码：原生 BarcodeDetector 环境应展示两张卡片；仅 jsQR 时<em>实测整体不识别</em>（定位点跨码误配，须框选单个码，属 §2.1 后续能力范围）</figcaption>
+    <figcaption>two-codes.png — 一图两码：zxing 阶段 1 整图即多码识别，应展示两张卡片；jsQR 仅作应急兜底（zxing 损坏时由阶段 3 象限梯子逐块救回）</figcaption>
   </figure>
   <figure>
     <img src="huge-with-small.png" alt="大图小码" width="320">
-    <figcaption>huge-with-small.png — 8000×5000 白底 + 右下角 120px 小码（验证两阶段解码；请用「上传」入口测全分辨率，截图只能取到缩放后的显示尺寸）</figcaption>
+    <figcaption>huge-with-small.png — 8000×5000 白底 + 右下角 120px 小码（验证三阶段解码的降采样快扫与全分辨率重试；请用「上传」入口测全分辨率，截图只能取到缩放后的显示尺寸）</figcaption>
   </figure>
   <figure>
     <img src="no-qr.png" alt="无二维码风景图" width="320">
