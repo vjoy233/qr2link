@@ -2,11 +2,14 @@
  * test/gen-qr.mjs — 本地生成测试二维码样例（handoff §4.7，不依赖网络）
  * 用法：npm i && node test/gen-qr.mjs
  * 产物（写入 test/）：normal / small / inverted / two-codes / huge-with-small / no-qr / text-code
+ *                    matrix/fmt-*.png — 11 种码制矩阵（V1.2-PLAN PR-1 全码制承诺，
+ *                    zxing-wasm writer 即 zint 生成，node 侧 devDependency，不入发行包）
  */
-import { mkdir } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import QRCode from 'qrcode';
 import sharp from 'sharp';
+import { writeBarcode } from 'zxing-wasm';
 
 const root = path.resolve(
   new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'),
@@ -77,6 +80,58 @@ await sharp(Buffer.from(scenery)).png().toFile(out('no-qr.png'));
 const { unlink } = await import('node:fs/promises');
 for (const f of ['.tmp-a.png', '.tmp-b.png', '.tmp-s.png']) {
   await unlink(tmp(f.replace('.tmp-', ''))).catch(() => {});
+}
+
+// 8. 码制矩阵（V1.2-PLAN PR-1）：zxing-wasm writer（zint）生成 11 种格式。
+//    payload 按码制字符集约束选取；若个别格式生成失败，从矩阵移除并回填 V1.2-PLAN
+const matrixDir = path.join(testDir, 'matrix');
+await mkdir(matrixDir, { recursive: true });
+const MATRIX = [
+  ['QRCode', 'https://example.com/qr2link-matrix-qr'],
+  ['EAN13', '5901234123457'],
+  ['UPCA', '036000291452'],
+  ['Code128', 'QR2LINK-CODE128'],
+  ['Code39', 'QR2LINK-39'],
+  ['Code93', 'QR2LINK-93'],
+  ['ITF', '1234567890'],
+  ['Codabar', 'A123456A'],
+  ['DataMatrix', 'https://example.com/qr2link-matrix-dm'],
+  ['Aztec', 'https://example.com/qr2link-matrix-aztec'],
+  ['PDF417', 'https://example.com/qr2link-matrix-pdf417'],
+];
+const failures = [];
+for (const [format, payload] of MATRIX) {
+  try {
+    const { image } = await writeBarcode(payload, { format, scale: 4, addQuietZones: true });
+    if (!image) throw new Error('no image blob');
+    await writeFile(path.join(matrixDir, `fmt-${format.toLowerCase()}.png`), Buffer.from(await image.arrayBuffer()));
+  } catch (e) {
+    failures.push(`${format}: ${e.message || e}`);
+  }
+}
+if (failures.length) {
+  console.error('码制矩阵生成失败（需从 V1.2-PLAN 承诺矩阵移除并回填）：\n  ' + failures.join('\n  '));
+  process.exitCode = 1;
+} else {
+  console.log('码制矩阵完成: test/matrix/fmt-*.png x ' + MATRIX.length);
+}
+
+// 9. 混合码图（PR #4 review P1-1）：QR（native 可命中）+ Code128（仅 zxing 可读）同图，
+//    锁定「native 命中后不短路 zxing」的合并行为（E9）。画布宽按 Code128 实际宽度动态计算
+{
+  const qrBuf = await QRCode.toBuffer('https://example.com/qr2link-mixed', { width: 300, margin: 2 });
+  const c128 = path.join(matrixDir, 'fmt-code128.png');
+  const c128Meta = await sharp(c128).metadata();
+  const W = 40 + 300 + 60 + c128Meta.width + 40;
+  const H = 340;
+  await sharp({ create: { width: W, height: H, channels: 3, background: '#ffffff' } })
+    .composite([
+      { input: qrBuf, left: 40, top: Math.round((H - 300) / 2) },
+      { input: c128, left: 40 + 300 + 60, top: Math.round((H - c128Meta.height) / 2) },
+    ])
+    .png()
+    .toFile(path.join(matrixDir, 'mixed-qr-1d.png'));
+  console.log(`混合码图完成: test/matrix/mixed-qr-1d.png (${W}x${H})`);
 }
 
 console.log('done: test images generated in test/');

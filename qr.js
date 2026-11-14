@@ -4,14 +4,24 @@
  * 挂载全局命名空间 window.QR2Link：
  *   canUseNativeQr()                      运行时检测原生 BarcodeDetector 是否支持 qr_code
  *   parseHttpUrl(raw)                     仅接受 http/https 链接，其余返回 null（DESIGN §4.4）
- *   decodeImage(source, opts)             三阶段双引擎解码（DESIGN §3.3，阶段 3 为 issue #1 多码分块）
+ *   decodeImage(source, opts)             三阶段解码，引擎按阶段分档（V1.2-PLAN PR-1，见下）
  *   getLastDecodeStats()                  最近一次 decodeImage 的阶段执行记录（测试/诊断探针，见下方说明）
+ *
+ * 引擎分档（zxing-wasm 引入后，V1.2-PLAN「zxing 性能基准」实测定档；PR #4 review 采纳：
+ * native 命中后不再短路 zxing——native 仅 QR，短路会漏同图 1D/DataMatrix 码，改为合并去重）：
+ *   阶段 1（≤2000px 快扫）：native + zxing 合并（native 空也不影响 zxing）；仍无命中时 jsQR 兜底
+ *   阶段 2（全分辨率）：rect ≤ 20MP 走 native + zxing 合并（jsQR 仅 zxingBroken 时参与）；
+ *                      20–50MP 维持 native → 空时 jsQR（v1.1 行为零变化，40MP 大图小码 B 用例锁定）
+ *   阶段 3（象限梯子）：native → jsQR 原样（issue #1 的 jsQR 多码救回机制；zxing 多码在 1/2 已覆盖）
+ *   zxing 覆盖全码制（QR + 1D + DataMatrix/Aztec/PDF417），jsQR/native 仍仅 QR；
+ *   已知边界：>20MP 图上的混合码（QR+1D）在 native 命中 QR 时 1D 可能漏（该档刻意不走 zxing 控耗时）
  *
  * source: Blob | dataURL 字符串 | http(s) URL 字符串
  *   注意：URL 字符串的 fetch 在「调用方所在文档」执行——右键识别链路必须由 offscreen 调用。
  * opts.rect: {x, y, w, h} 原图坐标裁剪区域（popup 框选），缺省为全图。
  *
- * 返回 Promise<[{text, isUrl, engine}]>（文本已去重、trim）；
+ * 返回 Promise<[{text, isUrl, engine, format}]>（文本已去重、trim；format 为 zxing canonical
+ * 码制名如 'QRCode'/'EAN13'/'Code128'，native/jsQR 命中恒为 'QRCode'）；
  * 图片解码 / 获取失败时 reject(Error)；解码成功但无二维码时 resolve([])。
  */
 (function () {
@@ -23,6 +33,12 @@
   // 内存暴涨与失败风险；用户可框选缩小范围后仍走全分辨率（DESIGN §3.3，验收 review #3）。
   // 50MP 下限保证 8000×5000（40MP）大图小码场景不受影响
   var STAGE2_MAX_PIXELS = 50000000;
+  // 阶段 2 的 zxing 像素分档（V1.2-PLAN「zxing 性能基准」实测定档，2026-11-13 参考机）：
+  // zxing 无码噪声图实测 20MP≈3.7s / 30MP≈6.0s / 50MP≈11.7s（tryHarder/tryRotate/tryInvert/
+  // tryDownscale 默认全开），线性外推 ~230ms/MP；取 20MP 保证阶段 2 单程 ≤5s 验收线。
+  // 超过本档的全分辨率重试仍由 jsQR 承担（≤50MP，行为与 v1.1 完全一致——40MP 大图小码
+  // 场景 jsQR 命中早退实测 1.2s，B 用例锁定）。无码最坏链路耗时整体不劣于 v1.1
+  var STAGE2_ZXING_MAX_PIXELS = 20000000;
   // 阶段 3 象限分块分辨率档位：rect ≤ 9MP（4K 截图 ≈ 8.3MP）逐块全分辨率扫；
   // 更大图（≤50MP，超出不进入阶段 3）按阶段 1 档位（最长边 ≤2000px）分块——定位点跨码
   // 误配与分辨率无关，逐块降采样仍可救较大的码；耗时上界由 RESCAN_BUDGET_MS 墙钟预算
@@ -66,6 +82,60 @@
     // 构造也全程包裹：任何异常静默降级 jsQR（DESIGN §2.1）
     nativeDetector = await new BarcodeDetector({ formats: ['qr_code'] });
     return nativeDetector;
+  }
+
+  // ---- zxing-wasm 引擎（V1.2-PLAN PR-1；vendor IIFE 全局 ZXingWASM，随包 wasm）----
+  // 关键：发行版默认 locateFile 指向 jsDelivr CDN——违反零网络承诺 + CWS 远程代码政策，
+  // 必须重写为 chrome.runtime.getURL 指向 lib/zxing_reader.wasm（随扩展打包）。
+  // 初始化失败（CSP 回归 / 浏览器 bug / wasm 损坏）→ zxingBroken 永久置位，
+  // 引擎链静默降级 jsQR——与上方「原生异常静默降级」同构（外部 review：jsQR 保留应急，拍板④）
+  var zxingInitPromise = null;
+  var zxingBroken = false;
+
+  function initZxing() {
+    if (zxingBroken) return Promise.resolve(false);
+    if (!zxingInitPromise) {
+      zxingInitPromise = (async function () {
+        try {
+          if (typeof ZXingWASM === 'undefined' || typeof ZXingWASM.prepareZXingModule !== 'function') {
+            throw new Error('NO_ZXING_GLOBAL');
+          }
+          await ZXingWASM.prepareZXingModule({
+            overrides: {
+              locateFile: function (path) {
+                return path && path.indexOf('.wasm') !== -1
+                  ? chrome.runtime.getURL('lib/zxing_reader.wasm')
+                  : path;
+              },
+            },
+            fireImmediately: true, // await 真正完成 wasm 实例化，而非仅登记 overrides
+          });
+          return true;
+        } catch (e) {
+          zxingBroken = true; // 永久降级；不做重试（每次 decode 重试坏模块只会放大卡顿）
+          return false;
+        }
+      })();
+    }
+    return zxingInitPromise;
+  }
+
+  // 单趟 zxing 读取（全码制；textMode Plain 保证 1D 原文不被 HRI 改写）。
+  // maxNumberOfSymbols 8：覆盖四角均布等现实多码，同时给无码噪声图上的投机扫描封顶。
+  // 单趟运行期异常视为「本引擎不可用」：置 zxingBroken 后按无结果返回，后续趟次走 jsQR
+  async function zxingRead(imageData) {
+    try {
+      var results = await ZXingWASM.readBarcodes(imageData, { textMode: 'Plain', maxNumberOfSymbols: 8 });
+      var hits = [];
+      for (var i = 0; i < (results || []).length; i++) {
+        var r = results[i];
+        if (r && r.text) hits.push({ text: r.text, engine: 'zxing', format: r.format || null });
+      }
+      return hits;
+    } catch (e) {
+      zxingBroken = true;
+      return [];
+    }
   }
 
   // ---- 阶段执行记录（测试/诊断探针）----
@@ -136,9 +206,14 @@
     loaded.img = null; // canvas / Blob 引用随作用域释放（DESIGN §6.6）
   }
 
-  // ---- 在指定分辨率下跑一遍「原生 → jsQR」引擎序列 ----
-  // 返回原始命中数组 [{text, engine}]
-  async function decodePass(loaded, rect, maxSide) {
+  // ---- 在指定分辨率下跑一遍引擎序列（引擎按阶段分档，V1.2-PLAN PR-1）----
+  // engines: { zxing: Boolean 该档是否启用 zxing, jsqr: Boolean 无命中时是否兜 jsQR }
+  //   阶段 1：{zxing:true, jsqr:true}——三引擎全跑，兜「zxing 健康但漏识别」回归面（外部 review 修订版）
+  //   阶段 2 ≤20MP：{zxing:true, jsqr:false}——jsQR 仅在 zxingBroken 时兜（大图双引擎会超墙钟）
+  //   阶段 2 >20MP / 阶段 3：{zxing:false, jsqr:true}——与 v1.1 行为一致
+  // 返回原始命中数组 [{text, engine, format?}]
+  async function decodePass(loaded, rect, maxSide, engines) {
+    engines = engines || { zxing: true, jsqr: true };
     var sw = rect.w, sh = rect.h;
     var scale = Math.min(1, maxSide / Math.max(sw, sh)); // 仅缩不小放大
     var cw = Math.max(1, Math.round(sw * scale));
@@ -162,16 +237,24 @@
         var detector = await getNativeDetector();
         var codes = await detector.detect(canvas);
         for (var i = 0; i < codes.length; i++) {
-          if (codes[i] && codes[i].rawValue) hits.push({ text: codes[i].rawValue, engine: 'native' });
+          if (codes[i] && codes[i].rawValue) hits.push({ text: codes[i].rawValue, engine: 'native', format: 'QRCode' });
         }
-      } catch (e) { /* 静默降级 jsQR */ }
+      } catch (e) { /* 静默降级 */ }
     }
 
-    // ② jsQR 兜底：仅当原生无结果时执行（保证识别一个，DESIGN §2.1）
-    if (hits.length === 0 && typeof jsQR === 'function') {
+    // ② zxing（全码制，多码原生）：与 native 命中合并、不短路——native 仅 QR，短路会漏同图
+    // 1D/DataMatrix 码（PR #4 review P1：混合码图随浏览器不同丢结果）；重复文本由 decodeImage
+    // 统一去重（先 native 后 zxing，同文以 native 标签保留）。wasm 懒加载（首次 decode 才实例化）
+    if (engines.zxing && !zxingBroken && await initZxing()) {
+      var zxHits = await zxingRead(imageData);
+      for (var z = 0; z < zxHits.length; z++) hits.push(zxHits[z]);
+    }
+
+    // ③ jsQR 兜底（仅 QR）：无命中且（本档允许 或 zxing 损坏）时执行（保证识别一个，DESIGN §2.1）
+    if (hits.length === 0 && typeof jsQR === 'function' && (engines.jsqr || zxingBroken)) {
       try {
         var code = jsQR(imageData.data, cw, ch, { inversionAttempts: 'attemptBoth' });
-        if (code && code.data) hits.push({ text: code.data, engine: 'jsqr' });
+        if (code && code.data) hits.push({ text: code.data, engine: 'jsqr', format: 'QRCode' });
       } catch (e) { /* jsQR 内部异常按无结果处理 */ }
     }
 
@@ -216,7 +299,7 @@
           lastDecodeStats.stage3DeadlineCut = true;
           return hits; // 超预算：剩余 tile/趟次不再执行（外部 review #2，P1）
         }
-        var tileHits = await decodePass(loaded, tiles[i], perTileMaxSide);
+        var tileHits = await decodePass(loaded, tiles[i], perTileMaxSide, { zxing: false, jsqr: true });
         ranInGrid = true;
         lastDecodeStats.stage3TilesRun++;
         for (var k = 0; k < tileHits.length; k++) hits.push(tileHits[k]);
@@ -248,18 +331,26 @@
       rect.h = Math.min(H - rect.y, Math.floor(opts.rect ? opts.rect.h : H));
       if (rect.w <= 0 || rect.h <= 0) throw new Error('INVALID_CROP_RECT');
 
-      // 阶段 1：最长边 > 2000px 时等比降采样快扫
-      lastDecodeStats = { stages: ['1'], stage3FullResTiles: null, stage3GridsRun: 0, stage3TilesRun: 0, stage3DeadlineCut: false };
-      var hits = await decodePass(loaded, rect, STAGE1_MAX_SIDE);
+      // 阶段 1：最长边 > 2000px 时等比降采样快扫（三引擎全跑兜回归面，外部 review 修订版）
+      lastDecodeStats = {
+        stages: ['1'], stage3FullResTiles: null, stage3GridsRun: 0, stage3TilesRun: 0, stage3DeadlineCut: false,
+        zxingBroken: zxingBroken, stage2Engine: null,
+      };
+      var hits = await decodePass(loaded, rect, STAGE1_MAX_SIDE, { zxing: true, jsqr: true });
 
-      // 重扫墙钟预算自此刻起算：阶段 2 自身单趟不可中断（上界即 50MP 像素预算），
+      // 重扫墙钟预算自此刻起算：阶段 2 自身单趟不可中断（上界即像素预算分档），
       // 预算用于阻止阶段 3 在其上继续叠加（外部 review #2，P1）
       var rescanDeadline = performance.now() + RESCAN_BUDGET_MS;
 
       // 阶段 2：无任何结果 → 原图全分辨率重试（覆盖大图小码）
-      // 像素预算内才执行：超出 50MP 的全图重扫得不偿失，落到「未识别到 + 框选重试」（验收 review #3）
+      // 像素预算内才执行：超出 50MP 的全图重扫得不偿失，落到「未识别到 + 框选重试」（验收 review #3）。
+      // 引擎分档（V1.2-PLAN 性能基准）：≤20MP 走 zxing（实测单程 ≤3.7s）；20–50MP 维持 jsQR
+      // （v1.1 行为零变化——40MP 大图小码命中早退 1.2s，B 用例锁定）
       if (hits.length === 0 && rect.w * rect.h <= STAGE2_MAX_PIXELS) {
-        hits = await decodePass(loaded, rect, Infinity);
+        var useZxingStage2 = rect.w * rect.h <= STAGE2_ZXING_MAX_PIXELS;
+        hits = await decodePass(loaded, rect, Infinity, { zxing: useZxingStage2, jsqr: !useZxingStage2 });
+        // stage2Engine 记录实际引擎：zxingBroken（含本趟内刚置位）时实际由 jsQR 兜底（PR #4 review P2-3）
+        lastDecodeStats.stage2Engine = (useZxingStage2 && !zxingBroken) ? 'zxing' : 'jsqr';
         lastDecodeStats.stages.push('2');
 
         // 阶段 3：仍无结果 → 象限分块重扫（issue #1 多码图）：1×2/2×1/2×2/4×4 逐块跑引擎序列，
@@ -274,14 +365,17 @@
         }
       }
 
-      // 去重 + trim + 链接分类
+      // 探针终值回写：zxingBroken 在本次解码中才置位时，初始快照会是 false，此处校正
+      lastDecodeStats.zxingBroken = zxingBroken;
+
+      // 去重 + trim + 链接分类 + 码制归一（native/jsQR 恒 QRCode，zxing 为 canonical 名）
       var seen = Object.create(null);
       var results = [];
       for (var i = 0; i < hits.length; i++) {
         var t = (hits[i].text || '').trim();
         if (!t || seen[t]) continue;
         seen[t] = true;
-        results.push({ text: t, isUrl: !!parseHttpUrl(t), engine: hits[i].engine });
+        results.push({ text: t, isUrl: !!parseHttpUrl(t), engine: hits[i].engine, format: hits[i].format || 'QRCode' });
       }
       return results;
     } finally {
