@@ -2418,6 +2418,42 @@ async function suiteH(h) {
     assert((await shot(page)) !== base, '最终预览应含第二次选择的 logo');
     await page.close().catch(() => {});
   });
+
+  await t('H15 logo 在途回调失效扩展：有效 A 在途 → 选被拒文件 / 点移除，A 不落地、提示不被抹掉（PR #6 复核 P2 采纳）', async () => {
+    const page = await newPopup(h);
+    await clearDraft(page);
+    await openGen(page);
+    await page.locator('#gen-input').fill(GEN_A);
+    const base = await shot(page); // 无 logo 基线
+    // 竞态时序可控：把 FileReader 延迟 300ms，使第一个选择的回调确定性晚于后续操作
+    await page.evaluate(() => {
+      const orig = FileReader.prototype.readAsDataURL;
+      FileReader.prototype.readAsDataURL = function (f) {
+        setTimeout(() => orig.call(this, f), 300);
+      };
+    });
+
+    // 场景 1：有效 A 在途 → 立即选被拒 SVG → A 被丢弃，拒绝提示保留（不被在途回调的 render 抹掉）
+    await page.setInputFiles('#gen-logo-file', ICON);
+    await page.setInputFiles('#gen-logo-file', { name: 'evil.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>') });
+    await sleep(900); // A 的延迟回调若未失效将在此落地
+    assert(await page.locator('#gen-logo-thumb').isHidden(), '被拒选择后的在途 logo 不应落地');
+    assert(await page.locator('#gen-error').isVisible(), '拒绝提示应保持可见');
+    assertEq(await page.locator('#gen-error').textContent(), msg('generate_logo_not_image'), '拒绝提示文案');
+    assertEq(await shot(page), base, '预览应保持无 logo 基线');
+
+    // 场景 2（真实可达路径：移除按钮仅在有已应用 logo 时可点）：C 已应用 → 在途 A → 点移除 → A 不复活
+    await page.locator('#gen-input').fill(GEN_A); // 清掉错误提示
+    await page.setInputFiles('#gen-logo-file', ICON);
+    await page.locator('#gen-logo-thumb').waitFor({ state: 'visible', timeout: 5000 }); // C 已应用
+    await page.setInputFiles('#gen-logo-file', path.join(EXT_DIR, 'icons', 'icon16.png')); // 在途 A（延迟回调）
+    await page.locator('#gen-logo-remove').click(); // 移除 C —— 同时必须使 A 失效
+    await sleep(900);
+    assert(await page.locator('#gen-logo-thumb').isHidden(), '移除后在途 logo 不应复活');
+    assert(await page.locator('#gen-error').isHidden(), '移除路径不应有错误提示');
+    assertEq(await shot(page), base, '移除后应回到无 logo 基线');
+    await page.close().catch(() => {});
+  });
 }
 
 // ================= 汇总 =================

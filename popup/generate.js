@@ -162,6 +162,7 @@
     logoRemove.type = 'button';
     logoRemove.hidden = true;
     logoRemove.addEventListener('click', function () {
+      logoSeq++; // 移除同样使在途加载失效：否则「移除后被旧回调复活」（PR #6 复核 P2 采纳）
       logoData = null;
       renderLogoState();
       render();
@@ -323,7 +324,11 @@
   // ---------------- logo 上传边界 ----------------
 
   function onLogoFile(f) {
-    if (!f) return;
+    if (!f) return; // 空选择（防御分支）：取消选择器不构成操作，不打断在途加载
+    // 任何新选择都先使在途异步回调失效 —— 含被拒文件（PR #6 复核 P2 采纳）：
+    // 若仅在通过校验后递增，「有效 A 在途 → 选被拒 B / 点移除」时 A 的旧回调
+    // 仍会落地：移除的 logo 被复活，且其 render() 会抹掉 B 的拒绝提示
+    var seq = ++logoSeq;
     if (!RASTER_MIME.test(f.type)) { // accept 属性只约束选择器，类型以 file.type 复核；
       // 仅收栅格格式：SVG 可携带外部资源引用（review P2 采纳，见常量注释）
       showError(T.generateLogoNotImage);
@@ -333,7 +338,6 @@
       showError(T.generateLogoTooLarge);
       return;
     }
-    var seq = ++logoSeq; // 快速连续选择：仅最后一次选择的异步回调生效（review P2 采纳）
     var reader = new FileReader();
     reader.onerror = function () { if (seq === logoSeq) showError(T.generateLogoNotImage); };
     reader.onload = function () {
