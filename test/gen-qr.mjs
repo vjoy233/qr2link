@@ -4,6 +4,8 @@
  * 产物（写入 test/）：normal / small / inverted / two-codes / huge-with-small / no-qr / text-code
  *                    matrix/fmt-*.png — 11 种码制矩阵（V1.2-PLAN PR-1 全码制承诺，
  *                    zxing-wasm writer 即 zint 生成，node 侧 devDependency，不入发行包）
+ *                    structured/*.png — WIFI/otpauth/hotp/vCard/geo 结构化解析 fixture（PR-2 C1）
+ *                    safety/*.png — 危险 URL fixture：punycode 混排/user-pass/http/IP/短链（PR-2 C2）
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -133,5 +135,35 @@ if (failures.length) {
     .toFile(path.join(matrixDir, 'mixed-qr-1d.png'));
   console.log(`混合码图完成: test/matrix/mixed-qr-1d.png (${W}x${H})`);
 }
+
+// 10. 结构化解析 fixture（V1.2-PLAN PR-2 C1）：qrcode 库生成，e2e F 组上传路径用。
+//     WIFI 用例覆盖全部四种转义（\; \, \: \\）；otpauth secret = Base32('12345678901234567890')
+//     （RFC 6238 SHA-1 向量密钥，页内函数断言直接复用）；vCard 覆盖折叠行 + 多值 TEL/EMAIL
+const structDir = path.join(testDir, 'structured');
+await mkdir(structDir, { recursive: true });
+await qrPng(path.join(structDir, 'wifi.png'),
+  'WIFI:T:WPA;S:My\\;Network;P:p\\;a\\:ss\\,\\\\;H:true;;', 320);
+await qrPng(path.join(structDir, 'otpauth.png'),
+  'otpauth://totp/QR2Link:alice%40example.com?issuer=QR2Link&secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&digits=6&period=30&algorithm=SHA1', 320);
+await qrPng(path.join(structDir, 'hotp.png'),
+  'otpauth://hotp/QR2Link:bob?issuer=QR2Link&secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&counter=5&digits=6', 320);
+await qrPng(path.join(structDir, 'vcard.png'),
+  ['BEGIN:VCARD', 'VERSION:3.0', 'FN:Alice Zhang', 'N:Zhang;Alice;;;',
+    'TEL:+8613800138000', 'TEL;TYPE=CELL:+8613900139000', 'EMAIL:alice@example.com',
+    'ORG:QR2Link Inc.', 'TITLE:Engineer', 'END:VCARD'].join('\r\n'), 320);
+await qrPng(path.join(structDir, 'geo.png'), 'geo:31.230416,121.473701', 320);
+console.log('结构化 fixture 完成: test/structured/{wifi,otpauth,hotp,vcard,geo}.png');
+
+// 11. 安全预检 fixture（V1.2-PLAN PR-2 C2）：e2e G 组上传路径用。
+//     danger-punycode 主机 xn--pple-43d = 'аpple'（西里尔 U+0430 + 拉丁 pple，punycode 混排）；
+//     纯西里尔/纯汉字 IDN 的不误报边界由 G2 在函数级直接断言（不产 fixture）
+const safetyDir = path.join(testDir, 'safety');
+await mkdir(safetyDir, { recursive: true });
+await qrPng(path.join(safetyDir, 'danger-punycode.png'), 'https://xn--pple-43d.com/qr2link-danger', 320);
+await qrPng(path.join(safetyDir, 'danger-userpass.png'), 'https://user:pass@example.com/qr2link-danger-up', 320);
+await qrPng(path.join(safetyDir, 'caution-http.png'), 'http://example.com/qr2link-caution-http', 320);
+await qrPng(path.join(safetyDir, 'caution-ip.png'), 'http://192.168.1.1/admin?x=1', 320);
+await qrPng(path.join(safetyDir, 'caution-short.png'), 'https://bit.ly/3xYzAbC', 320);
+console.log('安全 fixture 完成: test/safety/{danger-punycode,danger-userpass,caution-http,caution-ip,caution-short}.png');
 
 console.log('done: test images generated in test/');

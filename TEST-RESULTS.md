@@ -1,9 +1,9 @@
 # QR2Link 验收实测记录（TEST-RESULTS）
 
-> **当前结论（迭代四·PR-1，2026-11-14，唯一有效口径；PR #4 AIbot review 处置后）**
-> 方式：**Playwright 自动化验收**（`test/e2e/`，84 用例 = 69 存量 + 15 新增 E 组）+ zxing 性能基准（`scripts/bench-zxing.mjs`，20MP 生产档退出码门禁）
-> 对应：DESIGN.md §8 验证矩阵；V1.2-PLAN PR-1（zxing 引擎升级 + 全码制，见 §10；review 处置见 §10.4）
-> 结论速览：**四轮全绿 84/84 ×4（Edge 156 / Playwright Chromium × zh-CN / en-US）**；新增锁定：全码制 11 种矩阵、native+zxing 合并去重（混合码）、fallback 四态（含初始化失败）、阶段 2 引擎分档（20MP）与探针真实值、离线冷启动零外联、offscreen 1D 链路、浏览器 wasm 首实例化 ~15ms
+> **当前结论（迭代四·PR-2，2026-11-14，唯一有效口径）**
+> 方式：**Playwright 自动化验收**（`test/e2e/`，108 用例 = 84 存量 + 24 新增 F/G 组）
+> 对应：DESIGN.md §8 验证矩阵；V1.2-PLAN PR-2（C1 结构化解析 + C2 安全预检，见 §10.5；PR-1 见 §10.1–10.4）
+> 结论速览：**四轮全绿 108/108 ×4（Edge 156 / Playwright Chromium × zh-CN / en-US）**；新增锁定：WIFI/otpauth/vCard/tel/sms/mailto/geo 解析正负矩阵、TOTP RFC 6238 官方向量 ×12（SHA1/256/512）、倒计时与视图切换清理、安全分级/reasons 排序、danger 两段式确认、快捷键 danger 照开（拍板③）+ SW 无 Safety 全局
 >
 > 历史迭代：迭代一（54/54，§1–§7）、迭代二（62/62，§8）、迭代三（68/68，§9）仅作过程留痕，**用例计数以本节为准**。
 
@@ -260,3 +260,48 @@ Chrome 137+ 移除了命令行加载扩展能力，以下为品牌版 Chrome 手
 | P3-9 许可证 EOF 空行 | 清理 | git diff --check 干净 |
 
 E 组 10 → 15（+E5d/E6b/E7b/E9/E10），全量 79 → 84，四轮全绿 84/84 ×4。
+
+### 10.5 迭代四·PR-2：结构化解析 + 安全预检（V1.2-PLAN PR-2，2026-11-14）
+
+#### 变更摘要
+
+- 新增 `parsers.js`（全局 `Parsers`，仅 popup.html 引入）：WIFI 转义解析、otpauth TOTP **本地生成**（WebCrypto HMAC + RFC 6238，hotp 仅展示）、vCard（折叠行/多值/TYPE 参数剥离 + 下载 .vcf）、tel/sms/smsto/mailto/geo 语义卡片（仅复制不打开）；防御上限（≤4096 字符、WIFI ≤16 字段/256、vCard ≤100 行/512），失败一律 null 回落纯文本卡片；`maskSecrets()` 提供 otpauth secret= 显示层打码（存储/复制保持原文）
+- 新增 `safety.js`（全局 `Safety`，仅 popup.html 引入）：纯本地启发式 `assessUrl → {level, reasons}`；danger = punycode 混排（内嵌 RFC 3492 解码器）+ `user:pass@`；caution = http 明文 / IP 字面量（IPv4/IPv6/IPv4-mapped 统一归单一原因）/ 短链域名表（15 域，文件顶部常量）；reasons 按 danger 先于 caution、规则枚举序稳定输出
+- popup.js：结果文本下追加结构化卡片（全 textContent）、TOTP 动态码 + 每秒倒计时（重渲染/离开结果视图即清理 interval）、URL 卡片安全指示条（绿/黄/红 + 可展开原因）、**danger 级打开两段式确认**（复用 history-clear 3s 解除模式，拍板⑦）、结果原文与历史行 otpauth secret 显示层打码（历史行带「显示」切换）
+- background.js：**零行为改动**，仅加 openFirstLink 不接 Safety 的防合并注释（拍板③）；pack-zip INCLUDE 补 `parsers.js`/`safety.js`；PRIVACY ×2「识别历史」条目明示 otpauth secret 原文存储 + 界面打码（review P1）
+- i18n：49 新 key ×2 locales（91 key 总量）；reasons 文案经直接引用 map 渲染（`SAFETY_REASONS`），**未新增 computed `T[key]` 访问点**，check-locales 的 COMPUTED_ACCESS_ALLOWLIST 维持 2 不变（比方案原议的「computed + 上调计数」更强的静态可校验形态）
+
+#### 实测结论（四轮全绿 108/108 ×4：msedge/chromium × zh-CN/en-US）
+
+| 项 | 结论 | 证据 |
+|---|---|---|
+| WIFI 解析：四种转义 `\; \, \: \\`、nopass、小写前缀宽容、重复字段后值覆盖 | ✅ | F1 |
+| WIFI 负面：缺 S/空 SSID/非法 T/非法 H/超长/字段数超限/悬空反斜杠 → null | ✅ 全部拒绝 | F2 |
+| otpauth 解析：label issuer/account、digits/period/algorithm 默认值、secret 大小写与内嵌空白归一、hotp counter 默认 0 | ✅ | F3 |
+| **TOTP RFC 6238 Appendix B 官方向量**（SHA1/SHA256/SHA512 各算法 seed ×12 个时刻，8 位）+ 6 位取模 | ✅ 浏览器 WebCrypto 全部命中 | F4 |
+| TOTP 时间边界（跨窗换码/同窗同码）与 totpRemaining 纯函数 | ✅ | F5 |
+| otpauth 负面：非法 Base32 字符/尾位组合、缺 secret、digits 5/9、period 0/3601、algorithm MD5、非法 type → null | ✅ | F6 |
+| vCard：折叠行（RFC 6350 §3.2 语义）、多值 TEL/EMAIL、`;TYPE=` 参数剥离、值反转义、raw 原文保留 | ✅ | F7 |
+| vCard 负面：缺 BEGIN/END、无可展示字段、超行数 → null | ✅ | F8 |
+| tel/sms/smsto/mailto/geo 正负矩阵（%XX 解码、geo 越界、smsto 逗号形态等） | ✅ | F9/F9b |
+| 超长输入（>4096）拒绝；maskSecrets 仅替换 secret 值 | ✅ | F10 |
+| UI：WIFI 卡片字段还原 + 复制密码（还原后明文）写剪贴板 | ✅ | F11 |
+| UI：otpauth 卡片动态码 6 位 + 倒计时 Ns + secret 打码/显示切换；**结果原文显示层打码、复制取原文** | ✅ | F12 |
+| UI：历史行 otpauth 打码 + 显示切换；storage 与复制保持原文 | ✅ | F13 |
+| UI：vCard 字段卡片 + 下载锚点（data:URI + download 属性）；**恶意 FN 以纯文本原样渲染、onerror 不执行** | ✅ | F14 |
+| UI：geo 仅复制不打开；HOTP 仅参数展示无动态码 | ✅ | F15/F16 |
+| TOTP 倒计时随视图切换清理（interval 拦截探针，无泄漏） | ✅ | F17 |
+| 安全分级矩阵与 reasons 排序（danger 先于 caution、枚举序、多命中组合） | ✅ | G1 |
+| punycode 边界：纯汉字/纯西里尔/拉丁变音符 IDN 不误报；畸形 xn-- 标签静默跳过 | ✅ 方案口径已知边界（纯单码制仿冒词不检测） | G2 |
+| UI 分级指示条（ok/caution/danger 三色）+ 原因列表 i18n 文案与顺序 | ✅ 双语 | G3 |
+| danger 两段式确认：首击翻转→未确认 3s 还原→确认打开；caution 一键直开 | ✅ | G4/G5 |
+| **拍板③防回归：快捷键路径 danger URL 照常自动打开 + SW 中无 Safety 全局** | ✅ | G6 |
+| 存量 84 用例（A–E）零回归 | ✅ 四轮 | 全量 |
+
+#### 实现注记（供后续 PR 参考）
+
+- **RFC 6238 Appendix B 的 SHA-256/SHA-512 向量以勘误 2866 的分算法 seed 复现**（t=59 SHA256=46119246 / SHA512=90693936）；开发中曾按错误记忆的期望值（46119282/90693946）误判实现有 bug，经 node:crypto 交叉验证 + RFC 原文核对确认实现正确，期望值已修正
+- Base32 尾位合法性：合法无填充长度（字符数 mod 8 ∈ {0,2,4,5,7}）解码残位 ∈ 0–4，残位 >4 拒绝（F6 的 6 字符用例即残 6）；64 字节 seed 的 103 字符编码（残 3）为合法输入
+- 纯西里尔仿冒词（如 `xn--80ak6aa92e` = аррӏе）按方案口径不触发混排规则——「看起来像拉丁」检测需 confusables 表，超范围；G2 已锁定该边界为已知限制
+
+F/G 组 24 用例（F1–F17 含 F9b / G1–G6），全量 84 → 108，四轮全绿 108/108 ×4。
