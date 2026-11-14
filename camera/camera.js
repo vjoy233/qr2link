@@ -18,9 +18,11 @@
  *   - pagehide / visibilitychange(hidden) → 停循环 + 停全部 track（帧数据仅内存
  *     处理、页面退出即弃，不落盘不上传）；因隐藏/导航而停的（且当时在扫描）在回前台
  *     / BFCache pageshow(persisted) 时自动恢复（PR #7 AIbot review P2 采纳）
- *   - 取流竞态防护（review P1 采纳）：startSeq 取流代号——重试/切设备/恢复重叠时，
- *     过期的 getUserMedia/enumerateDevices 结果自弃并对旧流 tracks 立即止损
- *     （防 MediaStream 泄漏：摄像头常亮/设备占用）
+ *   - 取流竞态防护（review P1 + 复核 P1 采纳）：startSeq 取流代号，start() 与
+ *     stopAll() 均递增——重试/切设备/恢复重叠、以及隐藏/导航打断 pending 请求时，
+ *     过期的 getUserMedia/enumerateDevices 结果自弃并对旧流 tracks 立即止损（防
+ *     MediaStream 泄漏：隐藏页重建流、摄像头常亮/设备占用）；取流中被生命周期打断
+ *     记为可恢复态（starting），回前台/BFCache 返回自动重新取流
  *   - 运行中流中断（设备拔出/系统撤销权限）→ track ended 停循环 + 可重试引导（review P1）
  *   - 分辨率控制（review P1/P2 采纳）：getUserMedia ideal 约束 + submitFrame 对超
  *     FRAME_MAX_SIDE 的帧硬性等比降采样——高分辨率摄像头（4K）下单帧解码成本有界
@@ -53,9 +55,12 @@
     lastFrameAt: 0,       // 节流：上一帧提交时刻（rVFC now 时基）
     rvfcId: 0,            // requestVideoFrameCallback 句柄
     loopSeq: 0,           // 循环代号：停循环/重建时递增，使在途 decodeFrame 回调自弃
-    startSeq: 0,          // 取流代号：start() 递增；getUserMedia/play/enumerateDevices 的
-                          // 异步回调携带快照，过期即自弃并止损旧流（PR #7 AIbot review P1 采纳，
-                          // logoSeq/loopSeq 同族——重复 start 泄漏旧 MediaStream 的竞态）
+    startSeq: 0,          // 取流代号：start() 与 stopAll() 均递增——start 防重复取流竞态
+                          // （PR #7 AIbot review P1 采纳），stopAll 防生命周期竞态（复核 P1：
+                          // 隐藏/导航期间 pending 的 getUserMedia resolve 后 seq 仍有效，
+                          // 会在隐藏页上重建流开扫、BFCache 下摄像头无法回收）
+    starting: false,      // 取流进行中（start 已发、流未建立）：隐藏/导航打断时视同可恢复态
+                          // ——否则回前台/ BFCache 返回不会重启，页面卡「启动中」（复核 P1 连带）
     deviceId: '',         // 指定摄像头（空 = 浏览器默认，facingMode 优先后置）
     autoOpen: false,      // 自动打开开关（会话内，不持久化）
     stoppedByHide: false, // 因页面隐藏而停（当时在扫描 → 回前台自动恢复）
@@ -113,8 +118,9 @@
   }
 
   function start() {
-    stopAll(); // 幂等清理（切设备重入 / 流已死时的「继续扫」）
+    stopAll(); // 幂等清理（切设备重入 / 流已死时的「继续扫」）；内部亦递增 startSeq
     var seq = ++state.startSeq; // 取流代号：在途回调据此自弃（review P1 竞态防护）
+    state.starting = true; // 取流进行中（startLoop/onMediaError 清除）
     setGuide(null);
     hideBanner();
     setStatus(T.cameraStarting);
@@ -167,6 +173,7 @@
 
   function onMediaError(err) {
     var name = (err && err.name) || '';
+    state.starting = false; // 本次取流已终结（引导态不自动恢复，用户显式重试）
     setStatus('');
     if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {
       setGuide(T.cameraPermissionDenied, true);
@@ -201,7 +208,10 @@
         deviceSel.appendChild(o);
       }
       deviceSel.hidden = false;
-    }).catch(function () { deviceSel.hidden = true; });
+    }).catch(function () {
+      if (seq !== state.startSeq) return; // 旧枚举失败：不隐藏新一轮取流的选择器（复核 P2）
+      deviceSel.hidden = true;
+    });
   }
 
   // ---------------- 帧循环（rVFC + 丢帧锁 + 节流） ----------------
@@ -210,6 +220,7 @@
     if (state.scanning) return;
     state.loopSeq++; // 旧循环在途帧全部失效
     state.scanning = true;
+    state.starting = false; // 取流完成（本函数仅由流就绪后的 start 链路调用）
     state.inFlight = false;
     state.lastFrameAt = 0;
     hideBanner();
@@ -290,6 +301,10 @@
 
   function stopAll() {
     stopLoop();
+    state.startSeq++; // 生命周期停止同样使在途取流请求失效（复核 P1：否则 pending 的
+                      // getUserMedia resolve 后 seq 仍相等，会在隐藏/已导航页面上重建流
+                      // 开扫——BFCache 下文档存活，摄像头将持续占用无法回收）
+    state.starting = false;
     if (state.stream) {
       var tracks = state.stream.getTracks();
       for (var i = 0; i < tracks.length; i++) tracks[i].stop();
@@ -351,9 +366,11 @@
 
     // 页面退出/切后台：停循环 + 停全部 track（帧数据随之弃置，仅内存生命周期）
     // BFCache（review P2 采纳）：前进/后退导航离开触发 pagehide，返回时文档不重载而走
-    // pageshow(persisted)——记录「因导航而停」，恢复时重新取流（与 visibilitychange 同族）
+    // pageshow(persisted)——记录「因导航而停」，恢复时重新取流（与 visibilitychange 同族）。
+    // 取流中（starting）被打断同样记为可恢复态——否则回前台/BFCache 返回不会重启，
+    // 页面永远停在「启动中」（复核 P1 连带修复；横幅/引导态仍不自动恢复，用户显式继续）
     window.addEventListener('pagehide', function () {
-      state.stoppedByNav = state.scanning; // 横幅/引导态不自动恢复（用户显式继续）
+      state.stoppedByNav = state.scanning || state.starting;
       stopAll();
     });
     window.addEventListener('pageshow', function (e) {
@@ -364,7 +381,7 @@
     });
     document.addEventListener('visibilitychange', function () {
       if (document.hidden) {
-        state.stoppedByHide = state.scanning; // 横幅/引导态不自动恢复（用户显式继续）
+        state.stoppedByHide = state.scanning || state.starting;
         stopAll();
       } else if (state.stoppedByHide) {
         state.stoppedByHide = false;

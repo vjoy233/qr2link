@@ -2492,7 +2492,8 @@ async function suiteH(h) {
 // 真实码图（qr-camera.mjpeg）→ 生产链路零注入自动命中 + 自动打开/继续扫（I11/I11b）；
 // 高分辨率变体 2560×1440（qr-camera-hi.mjpeg）锁定 submitFrame 降采样（I12）。
 // 失败生命周期与竞态（PR #7 AIbot review 采纳回归）：双重启动竞态止损（I13）、
-// track ended 中断引导与重试（I14）、BFCache pageshow 恢复（I15）、无 label i18n 兜底（I16）
+// track ended 中断引导与重试（I14）、BFCache pageshow 恢复（I15）、无 label i18n 兜底（I16）、
+// 隐藏期取流竞态——stopAll 递增 startSeq 使 pending 请求失效止损 + starting 可恢复态（I17，复核 P1）
 
 async function suiteI() {
   currentGroup = 'I-CAMERA';
@@ -2874,6 +2875,50 @@ async function suiteI() {
       await page.locator('#camera-device').waitFor({ state: 'visible', timeout: 5000 });
       const labels = await page.locator('#camera-device option').evaluateAll((els) => els.map((e) => e.textContent));
       assertEq(labels.join('|'), msg('camera_unknown_device') + ' 1|' + msg('camera_unknown_device') + ' 2', '兜底名走 i18n');
+      await page.close().catch(() => {});
+    });
+
+    await t('I17 隐藏期取流竞态（复核 P1）：pending getUserMedia 时 visibilitychange(hidden) → 请求失效止损（无 live 轨/无 srcObject/不扫描）；回前台自动重新取流恢复', async () => {
+      const page = await h.context.newPage();
+      page.on('pageerror', (e) => pageErrors.push({ url: page.url(), err: String(e) }));
+      // 钉死时序：首次 getUserMedia 延迟 1500ms resolve（记录返回的流供止损审计）
+      await page.addInitScript(() => {
+        const orig = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        navigator.mediaDevices.getUserMedia = (c) => new Promise((res, rej) => {
+          setTimeout(() => orig(c).then((s) => {
+            (window.__gumStreams = window.__gumStreams || []).push(s);
+            res(s);
+          }, rej), 1500);
+        });
+      });
+      await page.goto(camUrl);
+      await sleep(400); // start#1 在途（1500ms 延迟）
+      await page.evaluate(() => {
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await sleep(2200); // 覆盖延迟 resolve 落地时刻（stopAll 已递增 startSeq → 应失效止损）
+      const st1 = await page.evaluate(() => {
+        const v = document.querySelector('#camera-video');
+        const streams = window.__gumStreams || [];
+        return {
+          stats: window.Camera.__testStats(),
+          srcObject: !!v.srcObject,
+          anyLive: streams.some((s) => s.getVideoTracks().some((t) => t.readyState === 'live')),
+          resolved: streams.length,
+        };
+      });
+      assert(st1.resolved >= 1, '延迟请求已 resolve（时序可控）');
+      assertEq(st1.stats.scanning, false, '隐藏期 resolve 不得启动扫描');
+      assertEq(st1.stats.streamLive, false, '不得建立流');
+      assertEq(st1.srcObject, false, '不得写 srcObject');
+      assertEq(st1.anyLive, false, 'resolve 的流必须被立即止损（无任何 live 轨）');
+      // 回前台：取流中被隐藏记为可恢复态（starting）→ 自动重新取流恢复扫描
+      await page.evaluate(() => {
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await waitStats(page, (s) => s.scanning && s.streamLive, 15000, '回前台恢复取流');
       await page.close().catch(() => {});
     });
   } finally {
