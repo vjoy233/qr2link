@@ -1,9 +1,9 @@
 # QR2Link 验收实测记录（TEST-RESULTS）
 
-> **当前结论（迭代四·PR-2，2026-11-14，唯一有效口径；PR #5 AIbot review 处置后）**
-> 方式：**Playwright 自动化验收**（`test/e2e/`，115 用例 = 84 存量 + 31 新增 F/G 组，含 review 采纳 +7）
-> 对应：DESIGN.md §8 验证矩阵；V1.2-PLAN PR-2（C1 结构化解析 + C2 安全预检，见 §10.5；review 处置见 §10.6；PR-1 见 §10.1–10.4）
-> 结论速览：**四轮全绿 115/115 ×4（Edge 156 / Playwright Chromium × zh-CN / en-US）**；新增锁定：WIFI/otpauth/vCard/tel/sms/mailto/geo 解析正负矩阵、TOTP RFC 6238 官方向量 ×12（SHA1/256/512）、倒计时与视图切换清理、安全分级/reasons 排序、danger 两段式确认、快捷键 danger 照开（拍板③）+ SW 无 Safety 全局、maskSecrets 抗编码参数名绕过、Base32 canonical、userPass 宽口径（仅用户名同样 danger）
+> **当前结论（迭代四·PR-3，2026-11-14，唯一有效口径）**
+> 方式：**Playwright 自动化验收**（`test/e2e/`，127 用例 = 115 存量 + 12 新增 H 组）
+> 对应：DESIGN.md §8 验证矩阵；V1.2-PLAN PR-3（D1 生成 + D2 样式，见 §10.7；PR-2 见 §10.5/10.6；PR-1 见 §10.1–10.4）
+> 结论速览：**四轮全绿 127/127 ×4（Edge 156 / Playwright Chromium × zh-CN / en-US）**；新增锁定：URL 预填与回退矩阵、草稿 storage.session 即时写/关闭重开恢复/草稿优先于预填/空草稿不被预填覆盖、超容量同步抛错 → i18n 提示 + 动作禁用 + 恢复、5×3 样式矩阵 15 组合 canvas 全互异 + 前景/背景色像素级断言、下载 PNG 回环解码 = 原文、复制图片经 clipboard.ps1 桥读回 280×280 并回环解码 + copyFailed 失败路径、logo 正向/移除回基线/非图片/超大/损坏图片/恰 2MB 闭区间边界、生成视图粘贴守卫、生成全流程零外联
 >
 > 历史迭代：迭代一（54/54，§1–§7）、迭代二（62/62，§8）、迭代三（68/68，§9）仅作过程留痕，**用例计数以本节为准**。
 
@@ -332,3 +332,34 @@ review 采纳 +7 用例（F18–F23 / G7），F/G 24 → 31，全量 108 → 115
 | P3 userPass 文案仍以 `user:pass@` 为例，未覆盖仅用户名形态 | 中英文案改为「链接内嵌登录信息（用户名或密码，仿冒风险）」；G7 补 UI 实际渲染文案断言 | G7 |
 
 用例计数不变（F18/G7 原地扩充断言），全量维持 115。
+
+### 10.7 迭代四·PR-3：生成二维码（V1.2-PLAN PR-3，D1+D2，2026-11-14）
+
+#### 变更摘要
+
+- vendor qr-code-styling **1.9.2**（`lib/qr-code-styling.js` 47KB UMD 单文件自包含，内嵌 qrcode-generator，全局 `QRCodeStyling`；vendor-sync SHA256 锁定；THIRD_PARTY_LICENSES 补 qr-code-styling-MIT / qrcode-generator-MIT——UMD 内嵌需单列，zint 仅测试侧不列）；devDependencies 钉版 `qr-code-styling: "1.9.2"`
+- 新增 `popup/generate.js`（全局 `window.Generate`，弹窗单宿主 = 拍板⑥，仿 crop.js 组件模式）：textarea + 预填当前标签页 URL（activeTab 下 `chrome.tabs.query` 可读 url，无需 tabs 权限）；草稿即时写 `chrome.storage.session`（关闭重开恢复，空串亦为草稿、不被预填覆盖，预填本身不落草稿）；QRCodeStyling canvas 实时预览（`qrOptions.errorCorrectionLevel: 'M'` 显式定死——库默认 Q，容量行为需可预测）；D2 样式 = 5 点阵（square/rounded/dots/classy/classy-rounded）× 3 定位角（square/dot/extra-rounded）× 前景/背景色 × logo；下载 PNG（`download()` data-URI anchor）+ 复制图片（`getRawData('png')` → `ClipboardItem.write`，clipboardWrite 已有）
+- popup 集成：`#view-generate`（wide 760，view-bar + 返回/Esc 与 results 同构）、home 第三入口（⚡，临时三格跨满行，PR-4 摄像头加入后 2×2 定稿）；**全局 paste 监听加生成视图守卫**（否则视图内文本粘贴会被「剪贴板无图片」错误页劫持）
+- 实现注记：① `update()` 为**合并语义**（键缺省 = 保留旧值）→ 移除 logo 必须显式传 `image: ''` 覆盖；② 超容量时 qrcode-generator 在 `update()` 内**同步抛错**，且 `_clearContainer` 先行清空容器（无残留旧码可导出），据此 catch → i18n 提示 + 停用动作；③ canvas 绘制异步（SVG → Image → drawImage），诊断探针 `Generate.__whenDrawn()` 暴露绘制 promise 供 e2e 等待像素稳定（沿 `getLastDecodeStats` 先例）；④ logo 上传加 Image 解码预检——MIME 声称图片但解不了码的文件会让库 `loadImage` 拒绝 → 预览空白却可导出，预检后才接纳
+- i18n：14 新 key ×2 locales（105 key 总量）；点阵/定位角选项用 canonical ASCII 名（PR-1 format 名先例），不进 i18n；文案全直接引用，check-locales 的 JS 引用闭包校验**纳入 `popup/generate.js`**（0 计算式访问，ALLOWLIST 维持 2）
+- pack-zip INCLUDE 不变（`popup`/`lib` 目录已覆盖 generate.js 与 vendor）；gen-qr fixture 不变（H 组生成视图自产内容，无需码图）
+
+#### 实测结论（四轮全绿 127/127 ×4：msedge/chromium × zh-CN/en-US）
+
+| 项 | 结论 | 证据 |
+|---|---|---|
+| URL 预填（tabs.query 注入）：预填 + 预览即时渲染 + wide 760 + 返回还原；预填不落草稿 | ✅ | H1 |
+| 预填回退矩阵：popup 自身 chrome-extension:// / chrome:// 特殊页 / 无 url / 无标签页 → 空 + 占位提示 + 动作禁用 | ✅ | H1b |
+| 输入变更重渲染：换文 canvas 变化、清空移除并禁用、同内容渲染确定性 | ✅ | H2 |
+| 下载 PNG：data-URI 锚点、文件名 qr2link.png、**下载产物回环解码 = 原文** | ✅ | H3 |
+| 超长报错：3000 字符（> v40-L 2953 字节，任何纠错级必溢出）→ 提示 + 无残留码 + 双动作禁用；超长态改样式仍报错；改短恢复 | ✅ | H4 |
+| 样式矩阵：5 点阵 × 3 定位角 **15 组合 canvas 像素指纹全互异**；前景色存在精确像素 + 亮边像素 = 背景色（换色后无残留黑点） | ✅ | H5 |
+| 复制图片：clipboard.ps1 read-image 桥读回 **280×280 图片并回环解码 = 原文**；clipboard.write 被拒 → copyFailed | ✅ | H6 |
+| logo 正向：缩略图 + canvas 变化、带 logo 回环解码；移除回基线（image 显式清空合并语义）；视图往返状态保留 | ✅ | H7 |
+| logo 边界：非图片 / 超 2MB / 损坏图片（解码预检）均拒 + i18n 提示 + 预览不变；恰 2MB 走「非图片」不触发「过大」（闭区间） | ✅ | H8 |
+| 草稿恢复：input 即时写 storage.session（且不落 storage.local）、关闭重开恢复、**草稿优先于预填**、空草稿不被预填覆盖 | ✅ | H9 |
+| 粘贴守卫：生成视图内真实 Ctrl+V 文本进输入框且不触发识别通道；home 视图粘贴文本行为不变（B20 契约） | ✅ | H10 |
+| 生成全流程零外联：输入/换样式/换色/logo/下载/复制全程无 http(s) 请求（零网络契约） | ✅ | H11 |
+| 存量 115 用例（A–G）零回归 | ✅ 四轮 | 全量 |
+
+H 组 12 用例（H1/H1b/H2–H11），全量 115 → 127，四轮全绿 127/127 ×4。

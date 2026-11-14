@@ -224,3 +224,25 @@ function getClipboardText() {
     { timeout: 15000, windowsHide: true, encoding: 'utf8' }).trim();
 }
 module.exports.getClipboardText = getClipboardText;
+
+/**
+ * 读回系统剪贴板图片并存为 PNG（验证「复制图片」，V1.2-PLAN PR-3 H 组）。
+ * 返回 { ok, width, height }；剪贴板被其他进程瞬时占用（CLIPBRD_E_CANT_OPEN）时重试。
+ */
+function getClipboardImage(outFile) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const out = execFileSync('powershell.exe',
+        ['-NoProfile', '-STA', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
+          path.join(__dirname, 'clipboard.ps1'), 'read-image', outFile],
+        { timeout: 20000, windowsHide: true, encoding: 'utf8' }).trim();
+      const m = /^OK (\d+)x(\d+)$/.exec(out);
+      return m ? { ok: true, width: Number(m[1]), height: Number(m[2]) } : { ok: false, width: 0, height: 0 };
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw new Error(`getClipboardImage 失败: ${String((lastErr && lastErr.message) || lastErr).split('\n')[0]}`);
+}
+module.exports.getClipboardImage = getClipboardImage;
