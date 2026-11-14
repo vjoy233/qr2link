@@ -132,7 +132,7 @@ Debug entry points: right-click inside the popup → Inspect; "service worker" o
 
 ### Automated acceptance (test/e2e)
 
-Playwright drives a real browser with the unpacked extension loaded — 148 acceptance cases (the automatable subset of DESIGN §8):
+Playwright drives a real browser with the unpacked extension loaded — 149 acceptance cases (the automatable subset of DESIGN §8):
 
 ```bash
 cd test/e2e

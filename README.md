@@ -132,7 +132,7 @@ npm run check:locales     # _locales 完整性校验（key 奇偶/引用闭包/m
 
 ### 自动化验收（test/e2e）
 
-Playwright 驱动真实浏览器加载未打包扩展跑 148 条验收用例（DESIGN §8 的可自动化子集），同一套用例支持中英双语回归（断言文案与 `_locales` 同源）：
+Playwright 驱动真实浏览器加载未打包扩展跑 149 条验收用例（DESIGN §8 的可自动化子集），同一套用例支持中英双语回归（断言文案与 `_locales` 同源）：
 
 ```bash
 cd test/e2e
