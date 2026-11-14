@@ -43,7 +43,7 @@
     'generatePlaceholder', 'generateTooLong',
     'generateDotsStyle', 'generateCornerStyle', 'generateFgColor', 'generateBgColor',
     'generateLogo', 'generateLogoRemove', 'generateLogoNotImage', 'generateLogoTooLarge',
-    'btnDownloadPng', 'btnCopyImage',
+    'btnDownloadPng', 'btnCopyImage', 'generateDownloadFailed',
     // 安全预检指示条（V1.2-PLAN PR-2，C2）
     'safetyLevelOk', 'safetyLevelCaution', 'safetyLevelDanger',
     'safetyReasonIdn', 'safetyReasonUserPass', 'safetyReasonHttp', 'safetyReasonIp',

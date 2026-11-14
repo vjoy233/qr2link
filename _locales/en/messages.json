@@ -404,12 +404,12 @@
     "description": "Generate view: remove the uploaded logo"
   },
   "generate_logo_not_image": {
-    "message": "Only image files are supported",
-    "description": "Generate view: logo file type boundary hint"
+    "message": "Only image files such as PNG / JPEG / WebP are supported",
+    "description": "Generate view: logo file type boundary hint (raster formats only; SVG rejected because it can carry external references)"
   },
   "generate_logo_too_large": {
-    "message": "Logo file too large (limit 2MB)",
-    "description": "Generate view: logo file size boundary hint"
+    "message": "Logo too large (file ≤2MB, size ≤1000px)",
+    "description": "Generate view: logo file size / decoded pixel limit hint"
   },
   "btn_download_png": {
     "message": "Download PNG",
@@ -418,5 +418,9 @@
   "btn_copy_image": {
     "message": "Copy image",
     "description": "Generate view: copy current preview image to clipboard"
+  },
+  "generate_download_failed": {
+    "message": "Download failed, please retry",
+    "description": "Generate view: feedback when async PNG export fails"
   }
 }

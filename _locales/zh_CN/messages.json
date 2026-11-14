@@ -404,12 +404,12 @@
     "description": "生成视图：移除已上传的 logo"
   },
   "generate_logo_not_image": {
-    "message": "仅支持图片文件",
-    "description": "生成视图：logo 文件类型边界提示"
+    "message": "仅支持 PNG / JPEG / WebP 等图片文件",
+    "description": "生成视图：logo 文件类型边界提示（仅栅格格式，SVG 因可携带外部引用不收）"
   },
   "generate_logo_too_large": {
-    "message": "Logo 文件过大（上限 2MB）",
-    "description": "生成视图：logo 文件大小边界提示"
+    "message": "Logo 过大（文件 ≤2MB，尺寸 ≤1000px）",
+    "description": "生成视图：logo 文件大小/解码后像素上限提示"
   },
   "btn_download_png": {
     "message": "下载 PNG",
@@ -418,5 +418,9 @@
   "btn_copy_image": {
     "message": "复制图片",
     "description": "生成视图：把当前预览作为图片复制到剪贴板"
+  },
+  "generate_download_failed": {
+    "message": "下载失败，请重试",
+    "description": "生成视图：PNG 导出异步失败的反馈"
   }
 }
