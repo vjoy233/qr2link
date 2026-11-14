@@ -13,7 +13,7 @@
   </header>
 
   <main id="main">
-    <!-- 主页：三入口 + 历史 -->
+    <!-- 主页：入口网格（本版临时三格；PR-4 摄像头加入后 2×2 定稿）+ 历史 -->
     <section id="view-home">
       <div class="entry-grid">
         <button id="btn-screenshot" class="entry-btn">
@@ -25,6 +25,11 @@
           <span class="entry-icon" aria-hidden="true">📁</span>
           <span class="entry-label" data-i18n="btnUpload"></span>
           <span class="entry-sub" data-i18n="btnUploadSub"></span>
+        </button>
+        <button id="btn-generate" class="entry-btn entry-btn-span">
+          <span class="entry-icon" aria-hidden="true">⚡</span>
+          <span class="entry-label" data-i18n="btnGenerate"></span>
+          <span class="entry-sub" data-i18n="btnGenerateSub"></span>
         </button>
       </div>
       <div class="clipboard-row">
@@ -70,6 +75,14 @@
       </div>
       <div id="result-list"></div>
     </section>
+
+    <!-- 生成二维码（generate.js 渲染于 #generate-root；弹窗单宿主，V1.2-PLAN 拍板⑥） -->
+    <section id="view-generate" hidden>
+      <div class="view-bar">
+        <button id="btn-back-generate" class="link-btn" data-i18n="btnBack"></button>
+      </div>
+      <div id="generate-root"></div>
+    </section>
   </main>
 
   <!-- 拖拽覆盖层 -->
@@ -78,11 +91,13 @@
 
   <script src="../lib/jsQR.js"></script>
   <script src="../lib/zxing-reader.js"></script>
+  <script src="../lib/qr-code-styling.js"></script>
   <script src="../i18n.js"></script>
   <script src="../qr.js"></script>
   <script src="../parsers.js"></script>
   <script src="../safety.js"></script>
   <script src="crop.js"></script>
+  <script src="generate.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

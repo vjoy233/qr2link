@@ -1,9 +1,9 @@
 # QR2Link 验收实测记录（TEST-RESULTS）
 
-> **当前结论（迭代四·PR-2，2026-11-14，唯一有效口径；PR #5 AIbot review 处置后）**
-> 方式：**Playwright 自动化验收**（`test/e2e/`，115 用例 = 84 存量 + 31 新增 F/G 组，含 review 采纳 +7）
-> 对应：DESIGN.md §8 验证矩阵；V1.2-PLAN PR-2（C1 结构化解析 + C2 安全预检，见 §10.5；review 处置见 §10.6；PR-1 见 §10.1–10.4）
-> 结论速览：**四轮全绿 115/115 ×4（Edge 156 / Playwright Chromium × zh-CN / en-US）**；新增锁定：WIFI/otpauth/vCard/tel/sms/mailto/geo 解析正负矩阵、TOTP RFC 6238 官方向量 ×12（SHA1/256/512）、倒计时与视图切换清理、安全分级/reasons 排序、danger 两段式确认、快捷键 danger 照开（拍板③）+ SW 无 Safety 全局、maskSecrets 抗编码参数名绕过、Base32 canonical、userPass 宽口径（仅用户名同样 danger）
+> **当前结论（迭代四·PR-3，2026-11-14，唯一有效口径；PR #6 AIbot review 处置 + 复核后）**
+> 方式：**Playwright 自动化验收**（`test/e2e/`，131 用例 = 115 存量 + 16 H 组，含 review 采纳 +3 + 复核 +1）
+> 对应：DESIGN.md §8 验证矩阵；V1.2-PLAN PR-3（D1 生成 + D2 样式，见 §10.7；PR #6 AIbot review 处置见 §10.8、复核见 §10.8.1；PR-2 见 §10.5/10.6；PR-1 见 §10.1–10.4）
+> 结论速览：**四轮全绿 131/131 ×4（Edge 156 / Playwright Chromium × zh-CN / en-US）**；新增锁定：URL 预填与回退矩阵、草稿 storage.session 即时写/关闭重开恢复/草稿优先于预填/空草稿不被预填覆盖、超容量提示 + 动作禁用 + 恢复、**UTF-8 正确性（中文/emoji 回环解码 = 原文；内嵌编码器逐 code unit 截断的修复锁定）**、**MB 级输入防冻结前置闸（按模式估算容量边界 2331B/5596 数字实测锚定）**、5×3 样式矩阵 15 组合 canvas 全互异 + 颜色像素级断言、下载 PNG 回环解码 = 原文 + 导出失败反馈、复制图片经 clipboard.ps1 桥读回 280×280 并回环解码 + copyFailed 失败路径、logo 正向/移除回基线/非图片/超大/损坏/SVG（栅格白名单）/高压缩比大尺寸（像素上限）/恰 2MB 闭区间/连续选择竞态/**在途回调对拒绝与移除的失效（H15）**、生成视图粘贴守卫、生成全流程零外联（含被拒 SVG 尝试）
 >
 > 历史迭代：迭代一（54/54，§1–§7）、迭代二（62/62，§8）、迭代三（68/68，§9）仅作过程留痕，**用例计数以本节为准**。
 
@@ -332,3 +332,56 @@ review 采纳 +7 用例（F18–F23 / G7），F/G 24 → 31，全量 108 → 115
 | P3 userPass 文案仍以 `user:pass@` 为例，未覆盖仅用户名形态 | 中英文案改为「链接内嵌登录信息（用户名或密码，仿冒风险）」；G7 补 UI 实际渲染文案断言 | G7 |
 
 用例计数不变（F18/G7 原地扩充断言），全量维持 115。
+
+### 10.7 迭代四·PR-3：生成二维码（V1.2-PLAN PR-3，D1+D2，2026-11-14）
+
+#### 变更摘要
+
+- vendor qr-code-styling **1.9.2**（`lib/qr-code-styling.js` 47KB UMD 单文件自包含，内嵌 qrcode-generator，全局 `QRCodeStyling`；vendor-sync SHA256 锁定；THIRD_PARTY_LICENSES 补 qr-code-styling-MIT / qrcode-generator-MIT——UMD 内嵌需单列，zint 仅测试侧不列）；devDependencies 钉版 `qr-code-styling: "1.9.2"`
+- 新增 `popup/generate.js`（全局 `window.Generate`，弹窗单宿主 = 拍板⑥，仿 crop.js 组件模式）：textarea + 预填当前标签页 URL（activeTab 下 `chrome.tabs.query` 可读 url，无需 tabs 权限）；草稿即时写 `chrome.storage.session`（关闭重开恢复，空串亦为草稿、不被预填覆盖，预填本身不落草稿）；QRCodeStyling canvas 实时预览（`qrOptions.errorCorrectionLevel: 'M'` 显式定死——库默认 Q，容量行为需可预测）；D2 样式 = 5 点阵（square/rounded/dots/classy/classy-rounded）× 3 定位角（square/dot/extra-rounded）× 前景/背景色 × logo；下载 PNG（`download()` data-URI anchor）+ 复制图片（`getRawData('png')` → `ClipboardItem.write`，clipboardWrite 已有）
+- popup 集成：`#view-generate`（wide 760，view-bar + 返回/Esc 与 results 同构）、home 第三入口（⚡，临时三格跨满行，PR-4 摄像头加入后 2×2 定稿）；**全局 paste 监听加生成视图守卫**（否则视图内文本粘贴会被「剪贴板无图片」错误页劫持）
+- 实现注记：① `update()` 为**合并语义**（键缺省 = 保留旧值）→ 移除 logo 必须显式传 `image: ''` 覆盖；② 超容量时 qrcode-generator 在 `update()` 内**同步抛错**，且 `_clearContainer` 先行清空容器（无残留旧码可导出），据此 catch → i18n 提示 + 停用动作；③ canvas 绘制异步（SVG → Image → drawImage），诊断探针 `Generate.__whenDrawn()` 暴露绘制 promise 供 e2e 等待像素稳定（沿 `getLastDecodeStats` 先例）；④ logo 上传加 Image 解码预检——MIME 声称图片但解不了码的文件会让库 `loadImage` 拒绝 → 预览空白却可导出，预检后才接纳
+- i18n：14 新 key ×2 locales（105 key 总量）；点阵/定位角选项用 canonical ASCII 名（PR-1 format 名先例），不进 i18n；文案全直接引用，check-locales 的 JS 引用闭包校验**纳入 `popup/generate.js`**（0 计算式访问，ALLOWLIST 维持 2）
+- pack-zip INCLUDE 不变（`popup`/`lib` 目录已覆盖 generate.js 与 vendor）；gen-qr fixture 不变（H 组生成视图自产内容，无需码图）
+
+#### 实测结论（四轮全绿 127/127 ×4：msedge/chromium × zh-CN/en-US）
+
+| 项 | 结论 | 证据 |
+|---|---|---|
+| URL 预填（tabs.query 注入）：预填 + 预览即时渲染 + wide 760 + 返回还原；预填不落草稿 | ✅ | H1 |
+| 预填回退矩阵：popup 自身 chrome-extension:// / chrome:// 特殊页 / 无 url / 无标签页 → 空 + 占位提示 + 动作禁用 | ✅ | H1b |
+| 输入变更重渲染：换文 canvas 变化、清空移除并禁用、同内容渲染确定性 | ✅ | H2 |
+| 下载 PNG：data-URI 锚点、文件名 qr2link.png、**下载产物回环解码 = 原文** | ✅ | H3 |
+| 超长报错：3000 字符（> v40-L 2953 字节，任何纠错级必溢出）→ 提示 + 无残留码 + 双动作禁用；超长态改样式仍报错；改短恢复 | ✅ | H4 |
+| 样式矩阵：5 点阵 × 3 定位角 **15 组合 canvas 像素指纹全互异**；前景色存在精确像素 + 亮边像素 = 背景色（换色后无残留黑点） | ✅ | H5 |
+| 复制图片：clipboard.ps1 read-image 桥读回 **280×280 图片并回环解码 = 原文**；clipboard.write 被拒 → copyFailed | ✅ | H6 |
+| logo 正向：缩略图 + canvas 变化、带 logo 回环解码；移除回基线（image 显式清空合并语义）；视图往返状态保留 | ✅ | H7 |
+| logo 边界：非图片 / 超 2MB / 损坏图片（解码预检）均拒 + i18n 提示 + 预览不变；恰 2MB 走「非图片」不触发「过大」（闭区间） | ✅ | H8 |
+| 草稿恢复：input 即时写 storage.session（且不落 storage.local）、关闭重开恢复、**草稿优先于预填**、空草稿不被预填覆盖 | ✅ | H9 |
+| 粘贴守卫：生成视图内真实 Ctrl+V 文本进输入框且不触发识别通道；home 视图粘贴文本行为不变（B20 契约） | ✅ | H10 |
+| 生成全流程零外联：输入/换样式/换色/logo/下载/复制全程无 http(s) 请求（零网络契约） | ✅ | H11 |
+| 存量 115 用例（A–G）零回归 | ✅ 四轮 | 全量 |
+
+H 组 12 用例（H1/H1b/H2–H11），全量 115 → 127，四轮全绿 127/127 ×4。
+
+### 10.8 PR #6 AIbot review 处置（2026-11-14，全部采纳 6 项：P1×2 + P2×4，无驳回）
+
+| Review 点 | 处置 | 证据 |
+|---|---|---|
+| P1 非 ASCII 文本生成静默改变内容（内嵌 qrcode-generator 默认 stringToBytes 逐 UTF-16 code unit 取 &0xff） | **实证确认**（node 对照独立 qrcode-generator 包：UMD 只打包 qrcode.js，其 qrcode_UTF8.js 默认切换器未进包）→ **调用侧 UTF-8 预编码**：TextEncoder 得 UTF-8 字节后逐字节映射 Latin-1 字符串传入（与该库自带 UTF-8 编码器逐字节等价、纯 ASCII 恒等；**不改 vendor**、维持字节一致 + SHA256 纪律）；中文/emoji（含 BMP 外代理对）/混合文本生成回环解码 = 原文 | H12 |
+| P1 大输入同步编码冻结主线程（自动选版 O(40×N)） | **容量前置闸**：按模式估算 bit 数（模式 4bit + v40 计数位 + 载荷位，正则与库一致；v40-M 容量 2334 codeword = 18672bit，边界 2331B/5596 数字/3391 字符经独立包实测锚定）超限不进 `qr.update()` 直接提示 + 手工清容器；库内抛错保留为第二道防线。**不设 debounce**：闸后同步编码代价有界（≤2331 字节当量），即时反馈优先；草稿写挂 catch 防超大输入触发配额时 unhandled rejection（写失败本身按 PR-2 拍板不做分支） | H13（1MB+emoji 输入 <3s 即时报错、返回键立即可用）；H12 锁三模式边界 |
+| P2 SVG logo 可携带外部资源引用（零外联契约破口） | 栅格白名单 `png/jpeg/gif/webp/bmp/avif`（MIME + accept 同步收紧）；SVG 直接拒绝；文案改「仅支持 PNG / JPEG / WebP 等图片文件」 | H8（SVG 拒绝）；H11（被拒 SVG 尝试期间仍零外联） |
+| P2 FileReader/Image 竞态（连续选择旧回调覆盖新选择） | 递增 `logoSeq` token，仅最后一次选择的异步回调生效 | H14（连续两选最终态 = 后选文件） |
+| P2 仅限文件字节、未限解码后像素（高压缩比展开） | 解码预检后校验 `naturalWidth/Height ≤ 1000`，超限拒绝（取拒绝而非降采样，与 2MB 拒绝一致）；文案合并为「文件 ≤2MB，尺寸 ≤1000px」 | H8（3000×3000 纯色 PNG fixture，字节远小于 2MB） |
+| P2 qr.download() 异步失败无反馈 | `.catch` → `generateDownloadFailed` 反馈（新 i18n key；与复制路径 copyFailed 对齐） | H3（prototype 注入 reject → 失败文案） |
+
+review 采纳 +3 用例（H12/H13/H14），H3/H8/H11 原地扩充断言，全量 127 → 130，四轮全绿 130/130 ×4。
+实现注记：AIbot 自述其本机未能跑 e2e（playwright 为全局安装经 NODE_PATH 引用的仓库惯例，非 CI 缺陷；本仓库无 CI 配置），H 组结论以本轮四轮实测为准。
+
+#### 10.8.1 复核轮（2026-11-14，AIbot 复核 `307128b`：上轮 6 项全部确认落实，其本机 Chromium 双语 H 组 15/15 复跑通过；新增 P2×1 采纳）
+
+| Review 点 | 处置 | 证据 |
+|---|---|---|
+| P2 `logoSeq` 仅在通过 MIME/大小校验后递增 —— 「有效 A 在途 → 选被拒文件 / 点移除」时 seq 不变，A 的旧回调照常落地：移除的 logo 被复活，且其 render() 会抹掉拒绝提示 | **采纳**：选择入口（含被拒文件，先于任何校验）与移除操作都先递增序号，使一切在途异步回调失效；空选择（取消选择器的防御分支）不递增——取消不构成操作 | H15（FileReader 延迟补丁锁定时序：在途 A → 被拒 SVG → A 不落地且提示保留；已应用 C → 在途 A → 移除 → A 不复活） |
+
+用例 H15 +1，全量 130 → 131，四轮全绿 131/131 ×4。

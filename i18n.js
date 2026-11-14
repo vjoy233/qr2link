@@ -38,6 +38,12 @@
     'btnDownloadVcf',
     'parseTelNumber', 'parseSmsBody', 'parseMailTo', 'parseMailSubject', 'parseMailBody',
     'parseGeoLat', 'parseGeoLon',
+    // 生成视图（V1.2-PLAN PR-3，D1+D2；点阵/定位角选项用 canonical 名不进 i18n）
+    'btnGenerate', 'btnGenerateSub',
+    'generatePlaceholder', 'generateTooLong',
+    'generateDotsStyle', 'generateCornerStyle', 'generateFgColor', 'generateBgColor',
+    'generateLogo', 'generateLogoRemove', 'generateLogoNotImage', 'generateLogoTooLarge',
+    'btnDownloadPng', 'btnCopyImage', 'generateDownloadFailed',
     // 安全预检指示条（V1.2-PLAN PR-2，C2）
     'safetyLevelOk', 'safetyLevelCaution', 'safetyLevelDanger',
     'safetyReasonIdn', 'safetyReasonUserPass', 'safetyReasonHttp', 'safetyReasonIp',

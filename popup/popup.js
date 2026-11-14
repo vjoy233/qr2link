@@ -47,7 +47,7 @@
   }
 
   // ---------------- 视图切换（动态宽度：DESIGN §4.0） ----------------
-  var VIEWS = ['home', 'preview', 'status', 'results'];
+  var VIEWS = ['home', 'preview', 'status', 'results', 'generate'];
 
   function setView(name) {
     state.view = name;
@@ -60,6 +60,9 @@
       resetWorkImage();
     } else if (name === 'preview' || name === 'results') {
       document.body.dataset.mode = 'wide';
+    } else if (name === 'generate') {
+      document.body.dataset.mode = 'wide';
+      window.Generate.open(); // 幂等：首次构建 + 恢复草稿/预填（V1.2-PLAN PR-3）
     }
     // status（识别中/错误）保持进入前的宽度模式
   }
@@ -650,6 +653,9 @@
   }
 
   function onPaste(e) {
+    // 生成视图内的粘贴是文本输入（textarea），不走识别通道——否则纯文本粘贴会被
+    // 「剪贴板中没有图片」错误页劫持（V1.2-PLAN PR-3）
+    if (state.view === 'generate') return;
     var items = e.clipboardData && e.clipboardData.items;
     if (!items) return;
     for (var i = 0; i < items.length; i++) {
@@ -705,6 +711,8 @@
 
     $('btn-back-preview').addEventListener('click', function () { window.Crop.cancel(); });
     $('btn-back-results').addEventListener('click', function () { setView('home'); });
+    $('btn-generate').addEventListener('click', function () { setView('generate'); });
+    $('btn-back-generate').addEventListener('click', function () { setView('home'); });
     $('btn-retry-crop').addEventListener('click', function () {
       if (state.imageBlob) enterPreviewAndCrop(state.imageBlob);
     });
@@ -722,7 +730,7 @@
     document.addEventListener('keydown', function (e) {
       if (e.key !== 'Escape') return;
       if (state.view === 'preview') window.Crop.cancel();
-      else if (state.view === 'results' || state.view === 'status') setView('home');
+      else if (state.view === 'results' || state.view === 'status' || state.view === 'generate') setView('home');
     });
 
     setupDrag();

@@ -3,7 +3,7 @@
  *
  * 用法：NODE_PATH="$(npm root -g)" node run-all.cjs <msedge|chromium|chrome> [suite]
  *   suite: A(SW链路) B(popup UI) C(截图主路径) D(手势/特殊页) E(zxing引擎/全码制)
- *          F(结构化解析) G(安全预检)，缺省全部
+ *          F(结构化解析) G(安全预检) H(生成二维码)，缺省全部
  *   语言：QR2LINK_E2E_LANG=zh-CN（缺省）| en-US —— 同一套用例双语回归（I18N-PLAN §4.8），
  *         断言文案经 msg() 读 _locales，与启动 --lang 同源；报告文件名带语言后缀
  *
@@ -20,13 +20,13 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const {
   launch, openPopupTab, serveStatic, setClipboard, osSendKeys, sleep,
-  getClipboardText, msg, uiLang, EXT_DIR, TEST_DIR,
+  getClipboardText, getClipboardImage, msg, uiLang, EXT_DIR, TEST_DIR,
 } = require('./helpers.cjs');
 
 const OUT_DIR = path.join(TEST_DIR, 'out');
 const REPORT_DIR = path.join(__dirname, 'report');
 const CHANNEL = process.argv[2] || 'msedge';
-const ONLY = process.argv[3] || 'ABCDEFG';
+const ONLY = process.argv[3] || 'ABCDEFGH';
 const LANG = uiLang(); // 本轮启动语言（--lang 与断言 msg() 均以此为源）
 const OS_PROC = CHANNEL === 'msedge' ? 'msedge' : 'chrome';
 
@@ -155,6 +155,12 @@ function makeAssets() {
     await QRCode.toFile(path.join(OUT_DIR, 'vcard-xss.png'),
       ['BEGIN:VCARD', 'VERSION:3.0', 'FN:<img src=x onerror="window.__xss=1">Bobby', 'TEL:+8613800138000', 'END:VCARD'].join('\r\n'),
       { width: 320, margin: 2 });
+
+    // 高压缩比大尺寸 logo（V1.2-PLAN PR-3 H 组，PR #6 review P2）：3000×3000 纯色
+    // PNG 字节数远小于 2MB，但解码后像素超限 → 像素上限拒绝路径
+    await sharp({ create: { width: 3000, height: 3000, channels: 3, background: '#3d7eff' } })
+      .png({ compressionLevel: 9 })
+      .toFile(path.join(OUT_DIR, 'logo-huge-dim.png'));
 
     // 最小合法 PDF（含 xref，PDFium 可读）
     const objs = [
@@ -1965,6 +1971,491 @@ async function suiteG(h) {
   await page.close().catch(() => {});
 }
 
+// ================= Suite H：生成二维码（V1.2-PLAN PR-3，D1+D2） =================
+
+async function suiteH(h) {
+  currentGroup = 'H-GENERATE';
+  console.log('\n== H-GENERATE: 生成二维码（generate.js：预填/草稿/预览/样式矩阵/下载/复制图片/logo 边界/UTF-8/防冻结） ==');
+
+  const DRAFT_KEY = 'qr2link.generate.draft';
+  const GEN_A = 'https://example.com/qr2link-gen-a';
+  const GEN_B = 'https://example.com/qr2link-gen-b';
+  const ICON = path.join(EXT_DIR, 'icons', 'icon48.png');
+
+  // 草稿存 storage.session（扩展级、跨 popup 页共享）且只在每页首次 open 读一次：
+  // 断言初始态的用例必须先清草稿，并各用全新 popup 页
+  const clearDraft = (page) => page.evaluate((k) => chrome.storage.session.remove(k), DRAFT_KEY);
+  const openGen = async (page) => {
+    await page.locator('#btn-generate').click();
+    await page.locator('#view-generate').waitFor({ state: 'visible', timeout: 5000 });
+  };
+  // popup 以标签页打开时 active tab 是它自己（chrome-extension://）→ 预填正向须注入 tabs.query
+  const patchQuery = (page, tabs) => page.evaluate((arr) => {
+    chrome.tabs.query = () => Promise.resolve(arr);
+  }, tabs);
+  const inputValue = (page) => page.locator('#gen-input').inputValue();
+  // canvas 像素指纹：QRCodeStyling 绘制是异步的（SVG → Image → drawImage），先等探针
+  const shot = (page) => page.evaluate(async () => {
+    await window.Generate.__whenDrawn();
+    const c = document.querySelector('#gen-preview canvas');
+    return c ? c.toDataURL('image/png') : null;
+  });
+  const pngBuffer = (dataUrl) => Buffer.from(dataUrl.split(',')[1], 'base64');
+  // 回环解码：把生成结果当图片喂回本扩展的识别链路，断言解出原文（收尾回 home，
+  // 便于调用方继续 openGen 或直接结束）
+  const decodeBack = async (page, file) => {
+    await goHome(page);
+    await page.setInputFiles('#file-input', file);
+    await waitResults(page);
+    const text = await page.locator('.result-card .result-text').first().textContent();
+    await goHome(page);
+    return text;
+  };
+
+  await t('H1 URL 预填：activeTab 可读 url → textarea 预填 + 预览即时渲染；视图 wide 760 与返回还原（V1.2-PLAN PR-3）', async () => {
+    const page = await newPopup(h);
+    await clearDraft(page);
+    assertEq(await page.locator('#btn-generate .entry-label').textContent(), msg('btn_generate'), '入口文案');
+    await patchQuery(page, [{ id: 1, url: 'https://example.com/qr2link-prefill' }]);
+    await openGen(page);
+    await page.waitForFunction(() => document.querySelector('#gen-input').value !== '', null, { timeout: 5000 });
+    assertEq(await inputValue(page), 'https://example.com/qr2link-prefill', '预填当前标签页 URL');
+    assert(await shot(page), '预填后应即时渲染预览 canvas');
+    assertEq(await bodyMode(page), 'wide', '生成视图为展开态');
+    assertEq(await bodyWidth(page), 760, '展开宽度 760');
+    // 预填不落草稿：未编辑即关，下次应重新预填当时页面
+    const stored = await page.evaluate((k) => chrome.storage.session.get(k), DRAFT_KEY);
+    assert(!(DRAFT_KEY in stored), '预填内容不应写入草稿');
+    await page.locator('#btn-back-generate').click();
+    await page.locator('#view-home').waitFor({ state: 'visible' });
+    assertEq(await bodyMode(page), 'compact', '返回后还原紧凑态');
+    await page.close().catch(() => {});
+  });
+
+  await t('H1b 预填回退：特殊页 / chrome:// / 无 url → 预填为空 + 占位提示、无预览、动作禁用', async () => {
+    const variants = [
+      ['真实查询（popup 标签页自身 = chrome-extension://）', null],
+      ['chrome:// 特殊页', [{ id: 1, url: 'chrome://settings/' }]],
+      ['无 url 字段', [{ id: 1 }]],
+      ['无标签页', []],
+    ];
+    for (const [label, tabs] of variants) {
+      const page = await newPopup(h);
+      await clearDraft(page);
+      if (tabs) await patchQuery(page, tabs);
+      await openGen(page);
+      await sleep(500); // 等 storage.get → tabs.query 异步链走完
+      assertEq(await inputValue(page), '', `${label}：预填应为空`);
+      assertEq(await page.locator('#gen-input').getAttribute('placeholder'), msg('generate_placeholder'), `${label}：占位提示`);
+      assertEq(await shot(page), null, `${label}：无预览`);
+      assert(await page.locator('#gen-download').isDisabled(), `${label}：下载应禁用`);
+      assert(await page.locator('#gen-copy').isDisabled(), `${label}：复制应禁用`);
+      await page.close().catch(() => {});
+    }
+  });
+
+  await t('H2 输入变更重渲染：换文 canvas 变化；清空 → 预览移除 + 动作禁用；再输入恢复', async () => {
+    const page = await newPopup(h);
+    await clearDraft(page);
+    await openGen(page);
+    await page.locator('#gen-input').fill(GEN_A);
+    const a = await shot(page);
+    assert(a, '输入后应有预览');
+    await page.locator('#gen-input').fill(GEN_B);
+    const b = await shot(page);
+    assert(b && b !== a, '换文后 canvas 应变化');
+    await page.locator('#gen-input').fill('');
+    assertEq(await shot(page), null, '清空后预览应移除');
+    assert(await page.locator('#gen-download').isDisabled(), '清空后下载禁用');
+    await page.locator('#gen-input').fill(GEN_A);
+    assertEq(await shot(page), a, '同内容同样式应渲染出相同 canvas（确定性）');
+    assert(await page.locator('#gen-download').isEnabled(), '恢复后下载可用');
+    await page.close().catch(() => {});
+  });
+
+  await t('H3 下载 PNG：data-URI 锚点触发下载、文件名 qr2link.png；下载产物回环解码 = 原文', async () => {
+    const page = await newPopup(h);
+    await clearDraft(page);
+    await openGen(page);
+    await page.locator('#gen-input').fill(GEN_A);
+    await shot(page);
+    const [dl] = await Promise.all([
+      page.waitForEvent('download', { timeout: 8000 }),
+      page.locator('#gen-download').click(),
+    ]);
+    assertEq(dl.suggestedFilename(), 'qr2link.png', '下载文件名');
+    const file = path.join(OUT_DIR, 'gen-download.png');
+    await dl.saveAs(file);
+    assert(fs.statSync(file).size > 200, '下载文件应为非空 PNG');
+    assertEq(await decodeBack(page, file), GEN_A, '下载的码应可被识别回原文');
+    // 失败路径注入（PR #6 review P2 采纳）：download 异步被拒 → 下载失败反馈
+    await openGen(page); // 重进生成视图（同页：输入与预览状态保留）
+    await page.evaluate(() => {
+      window.QRCodeStyling.prototype.download = function () { return Promise.reject(new Error('x')); };
+    });
+    await page.locator('#gen-download').click();
+    await page.waitForFunction((txt) => document.querySelector('#gen-download').textContent === txt, msg('generate_download_failed'), { timeout: 5000 });
+    await page.close().catch(() => {});
+  });
+
+  await t('H4 超长报错：超容量 → i18n 超长提示 + 预览移除 + 动作禁用；改短后恢复（qrcode-generator 同步抛错路径）', async () => {
+    const page = await newPopup(h);
+    await clearDraft(page);
+    await openGen(page);
+    await page.locator('#gen-input').fill(GEN_A);
+    assert(await shot(page), '基线预览');
+    await page.locator('#gen-input').fill('x'.repeat(3000)); // > v40-L 字节容量 2953，任何纠错级都溢出
+    const err = page.locator('#gen-error');
+    await err.waitFor({ state: 'visible', timeout: 3000 });
+    assertEq(await err.textContent(), msg('generate_too_long'), '超长提示文案');
+    assertEq(await shot(page), null, '超长时不应残留旧码');
+    assert(await page.locator('#gen-download').isDisabled(), '超长时下载禁用');
+    assert(await page.locator('#gen-copy').isDisabled(), '超长时复制禁用');
+    // 超长态下改样式仍应报错（update 为合并语义，旧 data 仍在）
+    await page.locator('#gen-dots').selectOption('dots');
+    assert(await err.isVisible(), '超长态改样式仍应提示');
+    await page.locator('#gen-input').fill(GEN_A);
+    assert(await err.isHidden(), '改短后提示消失');
+    assert(await shot(page), '改短后预览恢复');
+    assert(await page.locator('#gen-download').isEnabled(), '改短后下载可用');
+    await page.close().catch(() => {});
+  });
+
+  await t('H5 样式矩阵：5 点阵 × 3 定位角 15 组合 canvas 全互异；前景/背景色生效（像素级）（review P2 采纳）', async () => {
+    const page = await newPopup(h);
+    await clearDraft(page);
+    await openGen(page);
+    await page.locator('#gen-input').fill(GEN_A);
+    const DOTS = ['square', 'rounded', 'dots', 'classy', 'classy-rounded'];
+    const CORNERS = ['square', 'dot', 'extra-rounded'];
+    assertEq((await page.locator('#gen-dots option').allTextContents()).join(), DOTS.join(), '点阵选项');
+    assertEq((await page.locator('#gen-corners option').allTextContents()).join(), CORNERS.join(), '定位角选项');
+    const seen = new Map();
+    for (const d of DOTS) {
+      for (const c of CORNERS) {
+        await page.locator('#gen-dots').selectOption(d);
+        await page.locator('#gen-corners').selectOption(c);
+        const img = await shot(page);
+        assert(img, `${d}×${c} 应有预览`);
+        assert(!seen.has(img), `${d}×${c} 与 ${seen.get(img)} 渲染相同（样式未生效）`);
+        seen.set(img, `${d}×${c}`);
+      }
+    }
+    assertEq(seen.size, 15, '15 组合全互异');
+
+    // 颜色：亮边像素 = 背景色；码点中存在精确前景色像素
+    const probe = (fg) => page.evaluate(async (rgb) => {
+      await window.Generate.__whenDrawn();
+      const c = document.querySelector('#gen-preview canvas');
+      const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      let hasFg = false;
+      for (let i = 0; i < d.length && !hasFg; i += 4) {
+        hasFg = d[i] === rgb[0] && d[i + 1] === rgb[1] && d[i + 2] === rgb[2];
+      }
+      const o = (2 * c.width + 2) * 4; // (2,2) 落在 12px 亮边内
+      return { corner: [d[o], d[o + 1], d[o + 2]].join(), hasFg };
+    }, fg);
+    await page.locator('#gen-dots').selectOption('square');
+    await page.locator('#gen-corners').selectOption('square');
+    let p = await probe([0, 0, 0]);
+    assertEq(p.corner, '255,255,255', '默认背景白');
+    assert(p.hasFg, '默认前景黑');
+    await page.locator('#gen-fg').fill('#d93025');
+    await page.locator('#gen-bg').fill('#e8f0fe');
+    p = await probe([217, 48, 37]);
+    assertEq(p.corner, '232,240,254', '背景色生效');
+    assert(p.hasFg, '前景色生效');
+    assert(!(await probe([0, 0, 0])).hasFg, '换色后不应残留黑色码点');
+    await page.close().catch(() => {});
+  });
+
+  await t('H6 复制图片：clipboard.ps1 桥读回 280×280 图片并回环解码 = 原文；写入被拒 → copyFailed 反馈', async () => {
+    const page = await newPopup(h);
+    await clearDraft(page);
+    await openGen(page);
+    await page.locator('#gen-input').fill(GEN_B);
+    await shot(page);
+    setClipboard('clear');
+    await page.locator('#gen-copy').click();
+    await page.waitForFunction((txt) => document.querySelector('#gen-copy').textContent === txt, msg('copied'), { timeout: 5000 });
+    const clip = path.join(OUT_DIR, 'gen-clipboard.png');
+    fs.rmSync(clip, { force: true });
+    const info = getClipboardImage(clip);
+    assert(info.ok, '剪贴板应含图片');
+    assertEq(`${info.width}x${info.height}`, '280x280', '剪贴板图片尺寸 = 预览尺寸');
+    await sleep(1300); // 等 flash 复位（否则下次 flash 会把「已复制」记成原文案）
+    assertEq(await page.locator('#gen-copy').textContent(), msg('btn_copy_image'), 'flash 后文案复位');
+
+    // 失败路径：clipboard.write 被拒 → 既有 copyFailed 提示
+    await page.evaluate(() => { navigator.clipboard.write = () => Promise.reject(new Error('denied')); });
+    await page.locator('#gen-copy').click();
+    await page.waitForFunction((txt) => document.querySelector('#gen-copy').textContent === txt, msg('copy_failed'), { timeout: 5000 });
+
+    assertEq(await decodeBack(page, clip), GEN_B, '剪贴板里的码应可被识别回原文');
+    await page.close().catch(() => {});
+  });
+
+  await t('H7 logo：上传 → 缩略图 + canvas 变化、带 logo 仍可解码；移除 → 回到无 logo 基线（合并语义显式清空）', async () => {
+    const page = await newPopup(h);
+    await clearDraft(page);
+    await openGen(page);
+    await page.locator('#gen-input').fill(GEN_A);
+    const base = await shot(page);
+    assert(await page.locator('#gen-logo-thumb').isHidden(), '初始无缩略图');
+    assert(await page.locator('#gen-logo-remove').isHidden(), '初始无移除按钮');
+    await page.setInputFiles('#gen-logo-file', ICON);
+    await page.locator('#gen-logo-thumb').waitFor({ state: 'visible', timeout: 5000 });
+    const withLogo = await shot(page);
+    assert(withLogo && withLogo !== base, '带 logo 的 canvas 应不同于基线');
+    const file = path.join(OUT_DIR, 'gen-logo.png');
+    fs.writeFileSync(file, pngBuffer(withLogo));
+    assertEq(await decodeBack(page, file), GEN_A, '带 logo 的码仍应可识别');
+    // 回生成视图（同页：组件状态保留）→ 移除 logo
+    await openGen(page);
+    assertEq(await inputValue(page), GEN_A, '视图往返不重置输入');
+    assert(await page.locator('#gen-logo-thumb').isVisible(), '视图往返不丢 logo');
+    await page.locator('#gen-logo-remove').click();
+    assert(await page.locator('#gen-logo-thumb').isHidden(), '移除后缩略图隐藏');
+    assertEq(await shot(page), base, '移除后应回到无 logo 基线');
+    await page.close().catch(() => {});
+  });
+
+  await t('H8 logo 边界：非图片 / 超大（>2MB）/ 损坏图片 / SVG（栅格白名单）/ 高压缩比大尺寸（像素上限）均拒绝并有 i18n 提示，预览不变；恰 2MB 不触发「过大」（闭区间）', async () => {
+    const page = await newPopup(h);
+    await clearDraft(page);
+    await openGen(page);
+    await page.locator('#gen-input').fill(GEN_A);
+    const base = await shot(page);
+    const err = page.locator('#gen-error');
+    const errIs = (key) => page.waitForFunction((txt) => {
+      const e = document.querySelector('#gen-error');
+      return !e.hidden && e.textContent === txt;
+    }, msg(key), { timeout: 5000 });
+    const MB2 = 2 * 1024 * 1024;
+
+    await page.setInputFiles('#gen-logo-file', { name: 'note.txt', mimeType: 'text/plain', buffer: Buffer.from('not an image') });
+    await errIs('generate_logo_not_image');
+    await page.locator('#gen-input').fill(GEN_A); // 重渲染清提示（同文案的下一条断言才有区分度）
+    assert(await err.isHidden(), '重渲染后提示清除');
+
+    await page.setInputFiles('#gen-logo-file', { name: 'huge.png', mimeType: 'image/png', buffer: Buffer.alloc(MB2 + 1) });
+    await errIs('generate_logo_too_large');
+    await page.locator('#gen-input').fill(GEN_A);
+
+    // 损坏图片：MIME 是 image/png 但内容解不了码 → 解码预检拒绝（否则预览空白却可导出）
+    await page.setInputFiles('#gen-logo-file', { name: 'broken.png', mimeType: 'image/png', buffer: Buffer.from('definitely not a png') });
+    await errIs('generate_logo_not_image');
+    await page.locator('#gen-input').fill(GEN_A);
+
+    // 恰 2MB：过大小闸（上限闭区间），随后因解不了码落「非图片」而不是「过大」
+    await page.setInputFiles('#gen-logo-file', { name: 'edge.png', mimeType: 'image/png', buffer: Buffer.alloc(MB2) });
+    await errIs('generate_logo_not_image');
+    await page.locator('#gen-input').fill(GEN_A);
+
+    // SVG 拒绝（PR #6 review P2 采纳）：栅格白名单 —— SVG 可携带外部资源引用，
+    // 与「生成零外联」契约冲突（外联断言见 H11）
+    const evilSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><image href="https://evil.example.com/x.png"/></svg>';
+    await page.setInputFiles('#gen-logo-file', { name: 'evil.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(evilSvg) });
+    await errIs('generate_logo_not_image');
+    await page.locator('#gen-input').fill(GEN_A);
+
+    // 高压缩比大尺寸（3000×3000 纯色 PNG，字节远小于 2MB）→ 像素上限拒绝（PR #6 review P2 采纳）
+    await page.setInputFiles('#gen-logo-file', path.join(OUT_DIR, 'logo-huge-dim.png'));
+    await errIs('generate_logo_too_large');
+    await page.locator('#gen-input').fill(GEN_A);
+
+    assert(await page.locator('#gen-logo-thumb').isHidden(), '被拒文件不应成为 logo');
+    assert(await page.locator('#gen-logo-remove').isHidden(), '被拒文件不应出现移除按钮');
+    assertEq(await shot(page), base, '被拒文件不应改变预览');
+    assert(await page.locator('#gen-download').isEnabled(), '被拒后原预览仍可导出');
+    await page.close().catch(() => {});
+  });
+
+  await t('H9 草稿恢复：输入后关闭弹窗再开 → 内容保留（storage.session，草稿优先于预填）；清空亦为草稿', async () => {
+    const DRAFT = 'H9 draft 草稿内容 ' + Date.now();
+    const p1 = await newPopup(h);
+    await clearDraft(p1);
+    await openGen(p1);
+    await p1.locator('#gen-input').fill(DRAFT);
+    await sleep(300);
+    const stored = await p1.evaluate((k) => chrome.storage.session.get(k), DRAFT_KEY);
+    assertEq(stored[DRAFT_KEY], DRAFT, '草稿应即时写入 storage.session');
+    const local = await p1.evaluate(() => chrome.storage.local.get(null));
+    assert(!JSON.stringify(local).includes(DRAFT), '草稿不应落入 storage.local（仅会话级）');
+    await p1.close();
+
+    // 重开：即便当前页有可预填 URL，也应恢复草稿
+    const p2 = await newPopup(h);
+    await patchQuery(p2, [{ id: 1, url: 'https://example.com/qr2link-should-not-prefill' }]);
+    await openGen(p2);
+    await p2.waitForFunction((v) => document.querySelector('#gen-input').value === v, DRAFT, { timeout: 5000 });
+    assert(await shot(p2), '恢复草稿后应渲染预览');
+    // 用户显式清空 → 空串草稿，重开不应被预填覆盖
+    await p2.locator('#gen-input').fill('');
+    await sleep(300);
+    await p2.close();
+    const p3 = await newPopup(h);
+    await patchQuery(p3, [{ id: 1, url: 'https://example.com/qr2link-should-not-prefill' }]);
+    await openGen(p3);
+    await sleep(600);
+    assertEq(await inputValue(p3), '', '空草稿应保持为空、不被预填覆盖');
+    await clearDraft(p3);
+    await p3.close().catch(() => {});
+  });
+
+  await t('H10 粘贴守卫：生成视图内 Ctrl+V 文本进入输入框，不被识别通道的「剪贴板无图片」错误页劫持', async () => {
+    const page = await newPopup(h);
+    await clearDraft(page);
+    await openGen(page);
+    await page.locator('#gen-input').fill('');
+    setClipboard('text', { text: 'H10-pasted-into-generate' });
+    await page.locator('#gen-input').click();
+    await page.keyboard.press('Control+v');
+    await page.waitForFunction(() => document.querySelector('#gen-input').value !== '', null, { timeout: 5000 });
+    assertEq(await inputValue(page), 'H10-pasted-into-generate', '粘贴文本应进入输入框');
+    assert(await page.locator('#view-generate').isVisible(), '应停留在生成视图');
+    assert(await page.locator('#view-status').isHidden(), '不应跳到错误页');
+    assert(await shot(page), '粘贴内容应即时渲染');
+    // 对照：离开生成视图后，识别通道的粘贴行为不变（B20 契约）
+    await goHome(page);
+    await page.keyboard.press('Control+v');
+    await waitErr(page);
+    assertEq(await statusText(page), msg('err_clipboard_no_image'), 'home 视图粘贴文本仍走识别通道提示');
+    await clearDraft(page);
+    await page.close().catch(() => {});
+  });
+
+  await t('H11 生成全流程零外联：输入/换样式/换色/logo/下载/复制/被拒 SVG 尝试期间无 http(s) 请求（零网络契约）', async () => {
+    const page = await newPopup(h);
+    const urls = [];
+    page.on('request', (r) => urls.push(r.url()));
+    await clearDraft(page);
+    await openGen(page);
+    await page.locator('#gen-input').fill(GEN_A);
+    await page.locator('#gen-dots').selectOption('classy-rounded');
+    await page.locator('#gen-corners').selectOption('extra-rounded');
+    await page.locator('#gen-fg').fill('#1a73e8');
+    await page.setInputFiles('#gen-logo-file', ICON);
+    await page.locator('#gen-logo-thumb').waitFor({ state: 'visible', timeout: 5000 });
+    assert(await shot(page), '全样式 + logo 应渲染');
+    // 带 http 外链引用的 SVG：应被栅格白名单拒绝，且拒绝路径不发起任何网络请求
+    const evilSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><image href="https://evil.example.com/x.png"/></svg>';
+    await page.setInputFiles('#gen-logo-file', { name: 'evil.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(evilSvg) });
+    await sleep(400);
+    assert(await page.locator('#gen-logo-thumb').isVisible(), '前一个合法 logo 不受被拒尝试影响');
+    const [dl] = await Promise.all([
+      page.waitForEvent('download', { timeout: 8000 }),
+      page.locator('#gen-download').click(),
+    ]);
+    await dl.cancel().catch(() => {});
+    await page.locator('#gen-copy').click();
+    await page.waitForFunction((txt) => document.querySelector('#gen-copy').textContent === txt, msg('copied'), { timeout: 5000 });
+    const external = urls.filter((u) => !/^(chrome-extension:|data:|blob:)/.test(u));
+    assertEq(external.join(' '), '', '生成流程不应有外联请求');
+    await clearDraft(page);
+    await page.close().catch(() => {});
+  });
+
+  await t('H12 UTF-8 正确性：中文/emoji（含 BMP 外代理对）/混合文本生成回环解码 = 原文；容量按模式边界（PR #6 review P1 采纳：内嵌编码器默认逐 code unit 截断）', async () => {
+    const page = await newPopup(h);
+    await clearDraft(page);
+    await openGen(page);
+    const CASES = [
+      'https://example.com/qr2link-中文路径?查询=参数#锚点',
+      '中文内容测试，包含逗号、空格与全角标点「」《》。',
+      'emoji 😀🀄🫠 与文字混合 🄰①Ⅲ 及 surrogate 对 𝕏',
+    ];
+    for (const text of CASES) {
+      await page.locator('#gen-input').fill(text);
+      const file = path.join(OUT_DIR, 'gen-utf8.png');
+      fs.writeFileSync(file, pngBuffer(await shot(page)));
+      assertEq(await decodeBack(page, file), text, `回环解码 = 原文（${text.slice(0, 10)}…）`);
+      await openGen(page); // 回生成视图继续下一组（往返不重置输入）
+      assertEq(await inputValue(page), text, '视图往返输入保留');
+    }
+    // 容量边界（估算闸与库一致性的锚点）：v40-M byte 2331 字节 / numeric 5596 位（实测值）
+    await page.locator('#gen-input').fill('中'.repeat(777)); // 777×3 = 2331 字节，恰上限
+    assert(await shot(page), '恰 2331 UTF-8 字节应可生成');
+    await page.locator('#gen-input').fill('中'.repeat(778)); // 2334 字节 → 超限
+    await page.locator('#gen-error').waitFor({ state: 'visible', timeout: 3000 });
+    assertEq(await page.locator('#gen-error').textContent(), msg('generate_too_long'), '中文超限提示');
+    await page.locator('#gen-input').fill('1'.repeat(5596)); // Numeric 模式上限（前置闸按模式估算）
+    assert(await shot(page), '数字 5596 位应可生成（Numeric 容量大于字节容量）');
+    await page.locator('#gen-input').fill('1'.repeat(5597));
+    await page.locator('#gen-error').waitFor({ state: 'visible', timeout: 3000 });
+    await page.close().catch(() => {});
+  });
+
+  await t('H13 防冻结前置闸：MB 级粘贴即时报超限（不进同步编码）、动作禁用、返回可用（PR #6 review P1 采纳）', async () => {
+    const page = await newPopup(h);
+    await clearDraft(page);
+    await openGen(page);
+    const big = 'x'.repeat(1024 * 1024) + '😀'.repeat(512); // ~1MB ASCII + 代理对（TextEncoder 大输入亦须瞬时）
+    const t0 = Date.now();
+    await page.locator('#gen-input').fill(big);
+    await page.locator('#gen-error').waitFor({ state: 'visible', timeout: 5000 });
+    const dt = Date.now() - t0;
+    assert(dt < 3000, `超限应即时报错（实际 ${dt}ms），不应长阻塞主线程`);
+    assertEq(await shot(page), null, '不应有预览');
+    assert(await page.locator('#gen-download').isDisabled(), '下载禁用');
+    assert(await page.locator('#gen-copy').isDisabled(), '复制禁用');
+    await page.locator('#btn-back-generate').click(); // 弹窗未被冻结：返回立即可用
+    await page.locator('#view-home').waitFor({ state: 'visible', timeout: 2000 });
+    await page.close().catch(() => {});
+  });
+
+  await t('H14 logo 竞态防护：快速连续选择两个 logo，最终态 = 最后一次选择（PR #6 review P2 采纳）', async () => {
+    const page = await newPopup(h);
+    await clearDraft(page);
+    await openGen(page);
+    await page.locator('#gen-input').fill(GEN_A);
+    const base = await shot(page);
+    await page.setInputFiles('#gen-logo-file', path.join(EXT_DIR, 'icons', 'icon16.png'));
+    await page.setInputFiles('#gen-logo-file', ICON); // 不等第一个的 FileReader/Image 完成立即选第二个
+    await page.locator('#gen-logo-thumb').waitFor({ state: 'visible', timeout: 5000 });
+    const want = 'data:image/png;base64,' + fs.readFileSync(ICON).toString('base64');
+    await page.waitForFunction((w) => document.querySelector('#gen-logo-thumb').src === w, want, { timeout: 5000 });
+    assert((await shot(page)) !== base, '最终预览应含第二次选择的 logo');
+    await page.close().catch(() => {});
+  });
+
+  await t('H15 logo 在途回调失效扩展：有效 A 在途 → 选被拒文件 / 点移除，A 不落地、提示不被抹掉（PR #6 复核 P2 采纳）', async () => {
+    const page = await newPopup(h);
+    await clearDraft(page);
+    await openGen(page);
+    await page.locator('#gen-input').fill(GEN_A);
+    const base = await shot(page); // 无 logo 基线
+    // 竞态时序可控：把 FileReader 延迟 300ms，使第一个选择的回调确定性晚于后续操作
+    await page.evaluate(() => {
+      const orig = FileReader.prototype.readAsDataURL;
+      FileReader.prototype.readAsDataURL = function (f) {
+        setTimeout(() => orig.call(this, f), 300);
+      };
+    });
+
+    // 场景 1：有效 A 在途 → 立即选被拒 SVG → A 被丢弃，拒绝提示保留（不被在途回调的 render 抹掉）
+    await page.setInputFiles('#gen-logo-file', ICON);
+    await page.setInputFiles('#gen-logo-file', { name: 'evil.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>') });
+    await sleep(900); // A 的延迟回调若未失效将在此落地
+    assert(await page.locator('#gen-logo-thumb').isHidden(), '被拒选择后的在途 logo 不应落地');
+    assert(await page.locator('#gen-error').isVisible(), '拒绝提示应保持可见');
+    assertEq(await page.locator('#gen-error').textContent(), msg('generate_logo_not_image'), '拒绝提示文案');
+    assertEq(await shot(page), base, '预览应保持无 logo 基线');
+
+    // 场景 2（真实可达路径：移除按钮仅在有已应用 logo 时可点）：C 已应用 → 在途 A → 点移除 → A 不复活
+    await page.locator('#gen-input').fill(GEN_A); // 清掉错误提示
+    await page.setInputFiles('#gen-logo-file', ICON);
+    await page.locator('#gen-logo-thumb').waitFor({ state: 'visible', timeout: 5000 }); // C 已应用
+    await page.setInputFiles('#gen-logo-file', path.join(EXT_DIR, 'icons', 'icon16.png')); // 在途 A（延迟回调）
+    await page.locator('#gen-logo-remove').click(); // 移除 C —— 同时必须使 A 失效
+    await sleep(900);
+    assert(await page.locator('#gen-logo-thumb').isHidden(), '移除后在途 logo 不应复活');
+    assert(await page.locator('#gen-error').isHidden(), '移除路径不应有错误提示');
+    assertEq(await shot(page), base, '移除后应回到无 logo 基线');
+    await page.close().catch(() => {});
+  });
+}
+
 // ================= 汇总 =================
 
 async function writeReport({ channel, captureProbe }) {
@@ -2025,6 +2516,7 @@ async function main() {
     if (ONLY.includes('E')) await suiteE(h);
     if (ONLY.includes('F')) await suiteF(h);
     if (ONLY.includes('G')) await suiteG(h);
+    if (ONLY.includes('H')) await suiteH(h);
   } finally {
     // 报告文件名带语言后缀，双语回归各自留档
     const summary = await writeReport({ channel: `${CHANNEL}-${LANG}`, captureProbe });

@@ -115,7 +115,7 @@ function runChecks(overrides = {}) {
   // （key 来源是 data-i18n 属性值，已被 4a 全量校验）；新增动态访问必须先在此
   // 登记数量并说明 key 来源，否则守门拒绝（PR #3 AIbot review P2 采纳）
   const COMPUTED_ACCESS_ALLOWLIST = { 'popup/popup.js': 2 };
-  for (const f of ['popup/popup.js', 'popup/crop.js', 'background.js']) {
+  for (const f of ['popup/popup.js', 'popup/crop.js', 'popup/generate.js', 'background.js']) {
     const src = read(f);
     const computed = (src.match(/\b(?:T|I18N)\s*\[/g) || []).length;
     if (computed !== (COMPUTED_ACCESS_ALLOWLIST[f] || 0)) {

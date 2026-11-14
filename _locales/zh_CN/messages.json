@@ -362,5 +362,65 @@
   "command_scan_description": {
     "message": "截图并识别当前网页中的二维码",
     "description": "快捷键在 chrome://extensions/shortcuts 的描述"
+  },
+  "btn_generate": {
+    "message": "生成二维码",
+    "description": "主页入口：进入生成视图（V1.2-PLAN PR-3）"
+  },
+  "btn_generate_sub": {
+    "message": "自定义样式，本地生成并导出",
+    "description": "主页入口副标题"
+  },
+  "generate_placeholder": {
+    "message": "输入文字或链接，实时生成二维码（默认填入当前网页地址）",
+    "description": "生成视图：输入框占位提示；无 URL 可预填时也以此引导"
+  },
+  "generate_too_long": {
+    "message": "内容超出二维码容量上限，请缩短后重试",
+    "description": "生成视图：超容量报错（qrcode-generator 抛错时显示）"
+  },
+  "generate_dots_style": {
+    "message": "点阵样式",
+    "description": "生成视图：码点样式选择器标签"
+  },
+  "generate_corner_style": {
+    "message": "定位角样式",
+    "description": "生成视图：定位角样式选择器标签"
+  },
+  "generate_fg_color": {
+    "message": "前景色",
+    "description": "生成视图：码点颜色选择器标签"
+  },
+  "generate_bg_color": {
+    "message": "背景色",
+    "description": "生成视图：背景颜色选择器标签"
+  },
+  "generate_logo": {
+    "message": "上传 Logo",
+    "description": "生成视图：选择本地图片作为码中 logo"
+  },
+  "generate_logo_remove": {
+    "message": "移除",
+    "description": "生成视图：移除已上传的 logo"
+  },
+  "generate_logo_not_image": {
+    "message": "仅支持 PNG / JPEG / WebP 等图片文件",
+    "description": "生成视图：logo 文件类型边界提示（仅栅格格式，SVG 因可携带外部引用不收）"
+  },
+  "generate_logo_too_large": {
+    "message": "Logo 过大（文件 ≤2MB，尺寸 ≤1000px）",
+    "description": "生成视图：logo 文件大小/解码后像素上限提示"
+  },
+  "btn_download_png": {
+    "message": "下载 PNG",
+    "description": "生成视图：导出当前预览为 PNG"
+  },
+  "btn_copy_image": {
+    "message": "复制图片",
+    "description": "生成视图：把当前预览作为图片复制到剪贴板"
+  },
+  "generate_download_failed": {
+    "message": "下载失败，请重试",
+    "description": "生成视图：PNG 导出异步失败的反馈"
   }
 }

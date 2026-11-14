@@ -362,5 +362,65 @@
   "command_scan_description": {
     "message": "Capture the current page and scan it for QR codes",
     "description": "Keyboard shortcut description on chrome://extensions/shortcuts"
+  },
+  "btn_generate": {
+    "message": "Generate QR Code",
+    "description": "Home entry: open the generate view (V1.2-PLAN PR-3)"
+  },
+  "btn_generate_sub": {
+    "message": "Custom styles, generated and exported locally",
+    "description": "Home entry subtitle"
+  },
+  "generate_placeholder": {
+    "message": "Type text or a link to generate a QR code in real time (current page URL is pre-filled)",
+    "description": "Generate view: textarea placeholder; also guides when no URL can be pre-filled"
+  },
+  "generate_too_long": {
+    "message": "Content exceeds QR code capacity, please shorten it",
+    "description": "Generate view: over-capacity error (shown when qrcode-generator throws)"
+  },
+  "generate_dots_style": {
+    "message": "Dot style",
+    "description": "Generate view: dot style selector label"
+  },
+  "generate_corner_style": {
+    "message": "Corner style",
+    "description": "Generate view: corner square style selector label"
+  },
+  "generate_fg_color": {
+    "message": "Foreground",
+    "description": "Generate view: dot color picker label"
+  },
+  "generate_bg_color": {
+    "message": "Background",
+    "description": "Generate view: background color picker label"
+  },
+  "generate_logo": {
+    "message": "Upload Logo",
+    "description": "Generate view: pick a local image as the embedded logo"
+  },
+  "generate_logo_remove": {
+    "message": "Remove",
+    "description": "Generate view: remove the uploaded logo"
+  },
+  "generate_logo_not_image": {
+    "message": "Only image files such as PNG / JPEG / WebP are supported",
+    "description": "Generate view: logo file type boundary hint (raster formats only; SVG rejected because it can carry external references)"
+  },
+  "generate_logo_too_large": {
+    "message": "Logo too large (file ≤2MB, size ≤1000px)",
+    "description": "Generate view: logo file size / decoded pixel limit hint"
+  },
+  "btn_download_png": {
+    "message": "Download PNG",
+    "description": "Generate view: export current preview as PNG"
+  },
+  "btn_copy_image": {
+    "message": "Copy image",
+    "description": "Generate view: copy current preview image to clipboard"
+  },
+  "generate_download_failed": {
+    "message": "Download failed, please retry",
+    "description": "Generate view: feedback when async PNG export fails"
   }
 }
