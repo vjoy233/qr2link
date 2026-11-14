@@ -1,11 +1,11 @@
 # QR2Link 验收实测记录（TEST-RESULTS）
 
-> **当前结论（迭代四·PR-3，2026-11-14，唯一有效口径；PR #6 AIbot review 处置 + 复核后）**
-> 方式：**Playwright 自动化验收**（`test/e2e/`，131 用例 = 115 存量 + 16 H 组，含 review 采纳 +3 + 复核 +1）
-> 对应：DESIGN.md §8 验证矩阵；V1.2-PLAN PR-3（D1 生成 + D2 样式，见 §10.7；PR #6 AIbot review 处置见 §10.8、复核见 §10.8.1；PR-2 见 §10.5/10.6；PR-1 见 §10.1–10.4）
-> 结论速览：**四轮全绿 131/131 ×4（Edge 156 / Playwright Chromium × zh-CN / en-US）**；新增锁定：URL 预填与回退矩阵、草稿 storage.session 即时写/关闭重开恢复/草稿优先于预填/空草稿不被预填覆盖、超容量提示 + 动作禁用 + 恢复、**UTF-8 正确性（中文/emoji 回环解码 = 原文；内嵌编码器逐 code unit 截断的修复锁定）**、**MB 级输入防冻结前置闸（按模式估算容量边界 2331B/5596 数字实测锚定）**、5×3 样式矩阵 15 组合 canvas 全互异 + 颜色像素级断言、下载 PNG 回环解码 = 原文 + 导出失败反馈、复制图片经 clipboard.ps1 桥读回 280×280 并回环解码 + copyFailed 失败路径、logo 正向/移除回基线/非图片/超大/损坏/SVG（栅格白名单）/高压缩比大尺寸（像素上限）/恰 2MB 闭区间/连续选择竞态/**在途回调对拒绝与移除的失效（H15）**、生成视图粘贴守卫、生成全流程零外联（含被拒 SVG 尝试）
+> **当前结论（迭代四·PR-4 终章，2026-11-14，唯一有效口径；v1.2.0 收尾发布）**
+> 方式：**Playwright 自动化验收**（`test/e2e/`，141 用例 = 131 存量 + 10 I 组摄像头）
+> 对应：DESIGN.md §8 验证矩阵（v1.8）；V1.2-PLAN PR-4（B1 摄像头 + 收尾发布，见 §10.9；PR-3 见 §10.7/10.8/10.8.1；PR-2 见 §10.5/10.6；PR-1 见 §10.1–10.4）
+> 结论速览：**四轮全绿 141/141 ×4（Edge 156 / Playwright Chromium × zh-CN / en-US）**；本 PR 新增锁定：popup 四入口 2×2 定稿（📷📁🎥⚡ 顺序）与 chrome.tabs.create 打开扫码页、**真实链路层（fake media：getUserMedia 成功 / track live / rVFC 持续出帧过引擎 / 节流计数介于 1..seen / 单摄像头选择器隐藏）**、**确定性解码层（__testInjectFrame 注入 normal.png 帧 → decodeFrame 单趟链命中原文/engine=zxing/format + 横幅 + 停循环 + 不写 decodeImage 探针）**、横幅动作（复制读回系统剪贴板 = 原文 / 打开经白名单新开 example.com）、「继续扫」恢复（横幅隐藏 + 帧继续递增）、**自动打开开关（默认关不自动开页 / 开启生效 / 重载不持久化）**、pagehide 停全部 track 且不自动恢复、visibilitychange 隐藏停 track / 回前台自动恢复并继续出帧、权限拒绝（引导 + 重试幂等）与无设备（引导 + 无重试）路径；收尾：manifest 1.2.0、pack-zip 加 camera（26 条目 + 反斜杠自检）、README/PRIVACY ×2 重写、DESIGN v1.8 全套、旧引擎口径清理
 >
-> 历史迭代：迭代一（54/54，§1–§7）、迭代二（62/62，§8）、迭代三（68/68，§9）仅作过程留痕，**用例计数以本节为准**。
+> 历史迭代：迭代一（54/54，§1–§7）、迭代二（62/62，§8）、迭代三（68/68，§9）、迭代四 PR-1~PR-3（84→131，§10.1–10.8.1）仅作过程留痕，**用例计数以本节为准**。
 
 ---
 
@@ -385,3 +385,42 @@ review 采纳 +3 用例（H12/H13/H14），H3/H8/H11 原地扩充断言，全量
 | P2 `logoSeq` 仅在通过 MIME/大小校验后递增 —— 「有效 A 在途 → 选被拒文件 / 点移除」时 seq 不变，A 的旧回调照常落地：移除的 logo 被复活，且其 render() 会抹掉拒绝提示 | **采纳**：选择入口（含被拒文件，先于任何校验）与移除操作都先递增序号，使一切在途异步回调失效；空选择（取消选择器的防御分支）不递增——取消不构成操作 | H15（FileReader 延迟补丁锁定时序：在途 A → 被拒 SVG → A 不落地且提示保留；已应用 C → 在途 A → 移除 → A 不复活） |
 
 用例 H15 +1，全量 130 → 131，四轮全绿 131/131 ×4。
+
+### 10.9 迭代四·PR-4 终章：摄像头扫码 + 收尾发布（V1.2-PLAN PR-4，B1，2026-11-14）
+
+#### 变更摘要
+
+- `qr.js` 新增 **`decodeFrame(imageData) → Promise<results[]>`**（帧接缝，外部 review P1 采纳）：单趟引擎链 native + zxing 合并（不短路，与 decodePass 阶段 1 同构）→ 空结果 jsQR 兜底；**无三阶段/像素预算/墙钟**（摄像头帧 ≤1080p 小图）；直接消费 ImageData（native `detect()` 与 zxing `readBarcodes` 均收 ImageData，无二次 canvas）；**不写 `lastDecodeStats` 探针**（帧循环高频，保护 decodeImage 诊断契约——I3 锁定）；去重/trim/URL 分类/码制归一与 decodeImage 共用 `finalizeHits`（`decodeImage` 签名与行为零变化）
+- 新增 **`camera/` 三件套**（独立标签页，popup 入口 `chrome.tabs.create`；getUserMedia 是运行时权限 → **manifest 权限零新增**）：
+  - 帧管线：`requestVideoFrameCallback`（每帧先续订再处理，锁/节流丢帧不断流）→ 离屏 canvas `drawImage` → `getImageData` → `decodeFrame`
+  - 并发控制：**in-flight 丢帧锁**（上一帧未完成直接丢，不排队）+ **150ms 节流**（附加限频）；`loopSeq` 循环代号递增使停循环/重建后在途 decodeFrame 回调自弃（不触碰新循环的锁与状态）
+  - 命中：停循环出横幅（原文 textContent + 打开[仅 http/https]/复制/「继续扫」）；流保持运行，继续扫 = 流活重建循环 / 流死重新 getUserMedia；`pagehide`·`visibilitychange(hidden)` 停循环 + **停全部 track**（帧仅内存处理）；扫描中被隐藏回前台自动恢复（横幅/引导态不自动恢复，用户显式继续）
+  - 设备选择器（`enumerateDevices` >1 摄像头才显示，选中项 = 当前流 `getSettings().deviceId`，切换按 `exact deviceId` 重启流）；权限拒绝（NotAllowedError→引导+重试）/ 无设备（NotFoundError→引导无重试）/ 其他失败（引导+重试）分类文案；**自动打开开关默认关、仅会话内有效不持久化**
+  - 测试钩子：`Camera.__testInjectFrame(imageData)` 与生产共用 decodeFrame 并走同一 onHit；`__testStats()` 帧计数（seen/submitted/decoded/hits）+ 状态（scanning/inFlight/loopSeq/streamLive）探针
+- popup：home 入口网格 **2×2 定稿**（📷📁🎥⚡，删临时 `.entry-btn-span`）；`#btn-camera` → `chrome.runtime.getURL('camera/camera.html')` 新标签页
+- i18n：13 新 key ×2 locales（119 key 总量）；**check-locales 扩展**：data-i18n 扫描纳入 `camera/camera.html`、JS 闭包纳入 `camera/camera.js`（applyI18n 计算式访问 ×2 登记 ALLOWLIST，与 popup.js 同款来源说明）
+- e2e：helpers.cjs `launch({fakeMedia:true})` 变体（`--use-fake-device-for-media-stream` + `--use-fake-ui-for-media-stream`）+ `openCameraTab`；I 组自持 context（其余组不感知媒体参数）
+- 收尾发布：manifest **1.2.0**；pack-zip INCLUDE **只加 `camera`**（26 条目，反斜杠字节级自检通过，zip = `dist/qr2link-v1.2.0.zip`）；README ×2 重写（四入口功能表、「主流二维码与条码」不承诺穷举、权限表补 CSP/摄像头说明、**「快捷键直扫自动打开不做安全预检」边界句（PR-2 review 遗留）**、文件树、THIRD_PARTY 清单表）；PRIVACY ×2（摄像头帧本地内存不落盘、wasm 本地执行、生成完全本地三个新节）；DESIGN.md v1.8 全套（变更记录 + §1/§2.1/§3.1–3.3/§4.0/§4.5/§5.4–5.6/§6/§8/§9/§10/§11）；旧引擎口径清理（test/index.html 两处 jsQR/两阶段表述 → 三段链口径；run-all A2/B30–B32 已在 PR-1 更新，本 PR 复核无残留）
+
+#### 实测结论（四轮全绿 141/141 ×4：msedge/chromium × zh-CN/en-US）
+
+| 项 | 结论 | 证据 |
+|---|---|---|
+| popup 入口：`#btn-camera` 文案 + 网格恰 4 入口（📷📁🎥⚡ 顺序）+ 无跨行残留类；点击新开 camera 标签页并自动取流进入扫描 | ✅ | I1 |
+| 真实链路（fake media）：getUserMedia 成功、track readyState=live、rVFC 持续出帧（seen≥3）且过引擎（decoded≥1）、节流 submitted 介于 1..seen、视频轨有尺寸、扫描状态行、单摄像头选择器隐藏 | ✅ | I2 |
+| 确定性解码：注入 normal.png 帧 → decodeFrame 返回恰 1 条（原文 / engine=zxing / format=QRCode / isUrl）；横幅文本=原文、打开可见、命中状态行、停循环、hits=1；**getLastDecodeStats() 保持 null（帧解码不写 decodeImage 探针）** | ✅ | I3 |
+| 横幅动作：复制 → 系统剪贴板读回原文；打开 → 经 parseHttpUrl 白名单新开 example.com 页 | ✅ | I4 |
+| 继续扫：命中停循环 → 点继续扫横幅隐藏、循环重建、rVFC 帧继续递增、状态行回扫描 | ✅ | I5 |
+| 自动打开开关：默认关（命中不开页）；开启后命中自动开页；**重载页面（同会话）开关回到默认关（不持久化）** | ✅ | I6 |
+| pagehide：停循环 + 停全部 track（streamLive=false + srcObject 释放），且不自动恢复 | ✅ | I7 |
+| visibilitychange：隐藏停全部 track；回前台自动恢复扫描并继续出帧（framesSeen 递增） | ✅ | I8 |
+| 权限拒绝：NotAllowedError → 引导文案 + 重试按钮；重试幂等（stub 持续拒绝，文案不变） | ✅ | I9 |
+| 无设备：NotFoundError → 引导文案、无重试按钮 | ✅ | I10 |
+| 存量 131 用例（A–H）零回归（含 check-locales 119 key 新闭包、vendor、gen-qr 字节稳定、pack-zip 26 条目自检） | ✅ 四轮 | 全量 + 前置门禁 |
+
+I 组 10 用例（两层拆分——真实链路层 I1/I2/I7/I8 + 确定性解码层 I3–I6 + 错误路径 I9/I10），全量 131 → **141**，四轮全绿 **141/141 ×4**。
+实测注记：① fake media 变体下 popup 打开摄像头页全链路（入口点击 → 标签页 → 自动取流 → rVFC 出帧）双通道（Edge/Chromium）一致；② I9/I10 经 `addInitScript` 钉死 getUserMedia 拒绝形态——真权限弹窗不可自动化，本组锁定的是错误映射与引导交互（产品侧全部责任面）；③ **摄像头真机冒烟**（真实摄像头对准实体码）不属自动化范围，已列入人工清单（V1.2-PLAN「验证」节，需用户配合）；④ en-US 两轮首跑因机器前台被占用（oskeys.ps1 安全放弃注入 + 自动化浏览器被关闭，C/D 组环境性中断，报告留痕 `report/`），独占前台复跑后全绿——非代码回归（同代码 zh-CN 两轮一次通过）。
+
+#### 人工冒烟清单（PR-4 后待用户执行）
+
+- [ ] 弹窗四入口（📷📁🎥⚡）+ 生成/下载、摄像头真机（真实摄像头扫实体码 → 横幅 → 打开/复制/继续扫）、快捷键直扫行为不变（照常打开）、Edge 重复一遍（V1.2-PLAN「验证」节）
