@@ -44,6 +44,11 @@
     'generateDotsStyle', 'generateCornerStyle', 'generateFgColor', 'generateBgColor',
     'generateLogo', 'generateLogoRemove', 'generateLogoNotImage', 'generateLogoTooLarge',
     'btnDownloadPng', 'btnCopyImage', 'generateDownloadFailed',
+    // 摄像头扫码（V1.2-PLAN PR-4，B1；独立标签页 camera/camera.html）
+    'btnCamera', 'btnCameraSub',
+    'cameraTitle', 'cameraDevice', 'cameraStarting', 'cameraScanning', 'cameraHit',
+    'cameraAutoOpen', 'cameraPermissionDenied', 'cameraNoDevice', 'cameraStartFailed',
+    'cameraRetry', 'cameraResume',
     // 安全预检指示条（V1.2-PLAN PR-2，C2）
     'safetyLevelOk', 'safetyLevelCaution', 'safetyLevelDanger',
     'safetyReasonIdn', 'safetyReasonUserPass', 'safetyReasonHttp', 'safetyReasonIp',

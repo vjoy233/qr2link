@@ -711,6 +711,10 @@
 
     $('btn-back-preview').addEventListener('click', function () { window.Crop.cancel(); });
     $('btn-back-results').addEventListener('click', function () { setView('home'); });
+    $('btn-camera').addEventListener('click', function () {
+      // 摄像头扫码：独立标签页宿主（getUserMedia 是运行时权限，manifest 权限零新增）
+      chrome.tabs.create({ url: chrome.runtime.getURL('camera/camera.html') });
+    });
     $('btn-generate').addEventListener('click', function () { setView('generate'); });
     $('btn-back-generate').addEventListener('click', function () { setView('home'); });
     $('btn-retry-crop').addEventListener('click', function () {

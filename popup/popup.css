@@ -62,8 +62,6 @@ section[hidden] { display: none; }
 .entry-icon { font-size: 20px; line-height: 1; }
 .entry-label { font-weight: 600; }
 .entry-sub { font-size: 11px; color: var(--text-weak); }
-/* 第三入口跨满行（紧凑态 2 列网格下占整行；PR-4 摄像头加入后网格 2×2 定稿再调整） */
-.entry-btn-span { grid-column: 1 / -1; }
 
 .clipboard-row { padding: 10px 16px 0; }
 .wide-btn {

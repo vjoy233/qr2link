@@ -422,5 +422,57 @@
   "generate_download_failed": {
     "message": "Download failed, please retry",
     "description": "Generate view: feedback when async PNG export fails"
+  },
+  "btn_camera": {
+    "message": "Camera Scan",
+    "description": "Home entry: open the camera scan tab (V1.2-PLAN PR-4)"
+  },
+  "btn_camera_sub": {
+    "message": "Scan live with your camera",
+    "description": "Home camera entry sub-label"
+  },
+  "camera_title": {
+    "message": "Camera Scan",
+    "description": "Camera page: header sub-label and document title"
+  },
+  "camera_device": {
+    "message": "Select camera",
+    "description": "Camera page: device selector tooltip"
+  },
+  "camera_starting": {
+    "message": "Starting camera…",
+    "description": "Camera page: status line while acquiring the stream"
+  },
+  "camera_scanning": {
+    "message": "Point your camera at a QR code; it will be recognized automatically",
+    "description": "Camera page: status line while scanning"
+  },
+  "camera_hit": {
+    "message": "Code recognized",
+    "description": "Camera page: status line after a hit"
+  },
+  "camera_auto_open": {
+    "message": "Auto-open links after scanning (this session only)",
+    "description": "Camera page: auto-open switch label (off by default, not persisted)"
+  },
+  "camera_permission_denied": {
+    "message": "Camera permission was denied. Click the permission icon in the address bar, allow the camera, then retry",
+    "description": "Camera page: permission-denied guide"
+  },
+  "camera_no_device": {
+    "message": "No available camera device found",
+    "description": "Camera page: no-device guide"
+  },
+  "camera_start_failed": {
+    "message": "Failed to start the camera, please retry",
+    "description": "Camera page: other start failures (e.g. device busy) guide"
+  },
+  "camera_retry": {
+    "message": "Retry",
+    "description": "Camera page: retry button in the guide layer"
+  },
+  "camera_resume": {
+    "message": "Keep scanning",
+    "description": "Camera page: resume-scanning button in the hit banner"
   }
 }

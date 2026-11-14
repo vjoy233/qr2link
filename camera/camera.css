@@ -1,0 +1,146 @@
+/* camera.css — 摄像头扫码页（V1.2-PLAN PR-4，B1）
+   独立标签页宿主（非弹窗）：自建版式，配色与 popup.css 同源 */
+
+:root {
+  --accent: #1a73e8;
+  --accent-weak: rgba(26, 115, 232, 0.12);
+  --text: #202124;
+  --text-weak: #5f6368;
+  --line: #e8eaed;
+  --bg: #ffffff;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font: 14px/1.6 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 20px 40px;
+}
+
+/* ---- 头部 ---- */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 0 10px;
+  border-bottom: 1px solid var(--line);
+}
+.head-left { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.app-name { font-size: 16px; font-weight: 600; letter-spacing: 0.2px; }
+.app-sub { font-size: 13px; color: var(--text-weak); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.camera-select {
+  flex: none;
+  max-width: 220px;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: #fff;
+}
+
+/* ---- 预览区 ---- */
+#camera-stage {
+  position: relative;
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #000;
+  overflow: hidden;
+}
+#camera-video {
+  display: block;
+  width: 100%;
+  max-height: 480px;
+  object-fit: contain;
+}
+
+/* 引导层（权限拒绝 / 无设备 / 启动失败）：叠加于预览区中央 */
+#camera-guide {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  background: #f8f9fa;
+  text-align: center;
+}
+#camera-guide[hidden] { display: none; }
+#camera-guide-text { max-width: 420px; font-size: 13px; }
+
+.wide-btn {
+  min-width: 120px;
+  padding: 8px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.wide-btn:hover { background: #1765cc; }
+
+/* ---- 状态行 / 自动打开 ---- */
+.camera-status {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--text-weak);
+  text-align: center;
+  min-height: 20px; /* 状态缺席时不塌陷 */
+}
+.camera-auto {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-weak);
+  cursor: pointer;
+  user-select: none;
+}
+.camera-auto input { accent-color: var(--accent); }
+
+/* ---- 命中横幅 ---- */
+#camera-banner {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  background: var(--accent-weak);
+}
+#camera-banner[hidden] { display: none; }
+#camera-banner-text {
+  font-size: 14px;
+  word-break: break-all;
+  margin-bottom: 8px;
+}
+.camera-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+.mini-btn {
+  padding: 5px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.mini-btn:hover { background: #f1f3f4; }
+.mini-btn.flash { border-color: var(--accent); color: var(--accent); }
+#camera-open { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+#camera-open[hidden] { display: none; }
+#camera-resume.resume { border-color: var(--accent); color: var(--accent); }

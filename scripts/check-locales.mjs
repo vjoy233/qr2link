@@ -103,19 +103,23 @@ function runChecks(overrides = {}) {
   for (const k of expectLocale) if (!enKeys.has(k)) fail(`locale 缺 i18n.js/manifest 引用的 key：${k}`);
   for (const k of enKeys) if (!expectLocale.has(k)) fail(`locale 多出无人引用的 key：${k}（加入 KEYS 或删除）`);
 
-  // ---- 4a. popup.html data-i18n：先收集全部取值（任意格式），再对照 KEYS ----
-  // 不能按 key 格式过滤——snake_case 拼写错误同样必须被拒绝而非静默忽略（review P2）
-  const html = read('popup/popup.html');
-  for (const m of html.matchAll(/data-i18n="([^"]*)"/g)) {
-    if (!KEYS.includes(m[1])) fail(`popup.html data-i18n 引用了 KEYS 之外的 key：${JSON.stringify(m[1])}`);
+  // ---- 4a. HTML data-i18n：先收集全部取值（任意格式），再对照 KEYS ----
+  // 不能按 key 格式过滤——snake_case 拼写错误同样必须被拒绝而非静默忽略（review P2）；
+  // PR-4 起含 camera 页（新增宿主页面纳入同一守门，V1.2-PLAN PR-4）
+  for (const page of ['popup/popup.html', 'camera/camera.html']) {
+    const html = read(page);
+    for (const m of html.matchAll(/data-i18n="([^"]*)"/g)) {
+      if (!KEYS.includes(m[1])) fail(`${page} data-i18n 引用了 KEYS 之外的 key：${JSON.stringify(m[1])}`);
+    }
   }
 
   // ---- 4b. JS 侧 T.x / I18N.x / self.I18N.x ⊆ KEYS ----
-  // 计算式访问（T[变量]）静态不可见，实行登记制：仅允许 applyI18n 内 2 处
+  // 计算式访问（T[变量]）静态不可见，实行登记制：仅允许各自 applyI18n 内 2 处
   // （key 来源是 data-i18n 属性值，已被 4a 全量校验）；新增动态访问必须先在此
-  // 登记数量并说明 key 来源，否则守门拒绝（PR #3 AIbot review P2 采纳）
-  const COMPUTED_ACCESS_ALLOWLIST = { 'popup/popup.js': 2 };
-  for (const f of ['popup/popup.js', 'popup/crop.js', 'popup/generate.js', 'background.js']) {
+  // 登记数量并说明 key 来源，否则守门拒绝（PR #3 AIbot review P2 采纳）。
+  // 其余文件（含 PR-4 新增的 camera.js）除 applyI18n 外一律直接引用
+  const COMPUTED_ACCESS_ALLOWLIST = { 'popup/popup.js': 2, 'camera/camera.js': 2 };
+  for (const f of ['popup/popup.js', 'popup/crop.js', 'popup/generate.js', 'camera/camera.js', 'background.js']) {
     const src = read(f);
     const computed = (src.match(/\b(?:T|I18N)\s*\[/g) || []).length;
     if (computed !== (COMPUTED_ACCESS_ALLOWLIST[f] || 0)) {
