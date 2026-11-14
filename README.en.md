@@ -93,7 +93,7 @@ Full policy: [PRIVACY.en.md](PRIVACY.en.md).
 - Special pages (`chrome://` settings, the built-in PDF viewer, …) may refuse capture → take a system screenshot, then paste / upload
 - Non-URL content (Wi-Fi passwords, contact cards, …) is only displayed verbatim with a copy button — never rewritten or searched; tel: / sms: / mailto: / geo: cards likewise offer copy only, never auto-open
 - `javascript:` / `data:` and other non-http(s) payloads are never opened
-- **The shortcut auto-open is not safety-pre-checked** (the pre-check only applies to popup result cards) — this is the established behavior contract: the shortcut path stays zero-friction; rely on the popup path when you want risk hints
+- **The shortcut auto-open and the camera page's "open / auto-open" are not safety-pre-checked** (the pre-check only applies to popup result cards) — this is a deliberate layering: scan-to-open paths stay zero-friction (the camera "auto-open" is an explicit opt-in, off by default); rely on the popup path when you want risk ratings
 - Small codes inside large images trigger an automatic full-resolution retry; if that fails, draw a selection around the code and retry
 - **Multiple codes per image**: zxing decodes multiple codes in a single pass; the jsQR emergency path runs an automatic **quadrant tiling rescan** on multi-code images it misses as a whole (side-by-side / stacked pairs, four-corner layouts and other common cases are all recovered). For dense layouts or when only one code is found, **draw a selection** around the target code
 - The camera page's "auto-open after scanning" switch is off by default and session-only (not persisted); switching the tab to the background or closing the page stops the camera
@@ -132,7 +132,7 @@ Debug entry points: right-click inside the popup → Inspect; "service worker" o
 
 ### Automated acceptance (test/e2e)
 
-Playwright drives a real browser with the unpacked extension loaded — 143 acceptance cases (the automatable subset of DESIGN §8):
+Playwright drives a real browser with the unpacked extension loaded — 148 acceptance cases (the automatable subset of DESIGN §8):
 
 ```bash
 cd test/e2e

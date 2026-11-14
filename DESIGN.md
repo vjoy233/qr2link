@@ -8,7 +8,7 @@
 
 | 版本 | 说明 |
 |------|------|
-| v1.8 | v1.2「双向工具箱」迭代收尾（V1.2-PLAN.md，4 个串行 PR 全部合并；grill 拍板 8 项 + 外部 review + PR #4/#5/#6 AIbot review 处置见 V1.2-PLAN 文末）：① **引擎升级**（PR-1/#4）——引入 zxing-wasm@3.1.6（WebAssembly 本地执行，`locateFile` 重写为 `chrome.runtime.getURL` 杜绝 CDN，CSP 加 `wasm-unsafe-eval`），引擎链变更为 **native+zxing 合并 → jsQR 空结果兜底**，阶段 2 按性能基准分档（≤20MP zxing / 20–50MP 维持 v1.1 行为），全码制（QR/1D/DataMatrix/Aztec/PDF417，拍板⑧），vendor 三文件 SHA256 门禁（`scripts/vendor-sync.mjs`）；② **结构化解析 + 安全预检**（PR-2/#5）——`parsers.js`（WIFI/otpauth TOTP 本地动态码/vCard/tel/sms/mailto/geo，拍板①）与 `safety.js`（纯本地启发式三级分级，danger 两段式确认拍板⑦；快捷键直扫不预检拍板③）；③ **生成视图**（PR-3/#6）——`popup/generate.js` 弹窗内嵌（拍板⑥），qr-code-styling@1.9.2，点阵×定位角×颜色×logo，UTF-8 预编码 + 容量前置闸，草稿存 storage.session；④ **摄像头扫码**（PR-4）——独立标签页 `camera/`（getUserMedia 运行时权限，manifest 零新增），`qr.js` 新增 `decodeFrame` 单趟帧接缝，rVFC + in-flight 丢帧锁 + 150ms 节流，自动打开开关默认关仅会话内有效；⑤ 收尾——版本 1.2.0、pack-zip 加 `camera`、README/PRIVACY ×2 重写（快捷键不预检边界句、CSP 说明、摄像头/wasm/生成本地口径）、旧引擎口径清理、e2e 至 **143 用例**（A–I 九组，msedge/chromium × zh-CN/en-US 四轮全绿；含「真机等价」MJPEG 实帧层——人工冒烟「摄像头真机」的软件全链路自动化等价，I11/I11b） |
+| v1.8 | v1.2「双向工具箱」迭代收尾（V1.2-PLAN.md，4 个串行 PR 全部合并；grill 拍板 8 项 + 外部 review + PR #4/#5/#6 AIbot review 处置见 V1.2-PLAN 文末）：① **引擎升级**（PR-1/#4）——引入 zxing-wasm@3.1.6（WebAssembly 本地执行，`locateFile` 重写为 `chrome.runtime.getURL` 杜绝 CDN，CSP 加 `wasm-unsafe-eval`），引擎链变更为 **native+zxing 合并 → jsQR 空结果兜底**，阶段 2 按性能基准分档（≤20MP zxing / 20–50MP 维持 v1.1 行为），全码制（QR/1D/DataMatrix/Aztec/PDF417，拍板⑧），vendor 三文件 SHA256 门禁（`scripts/vendor-sync.mjs`）；② **结构化解析 + 安全预检**（PR-2/#5）——`parsers.js`（WIFI/otpauth TOTP 本地动态码/vCard/tel/sms/mailto/geo，拍板①）与 `safety.js`（纯本地启发式三级分级，danger 两段式确认拍板⑦；快捷键直扫不预检拍板③）；③ **生成视图**（PR-3/#6）——`popup/generate.js` 弹窗内嵌（拍板⑥），qr-code-styling@1.9.2，点阵×定位角×颜色×logo，UTF-8 预编码 + 容量前置闸，草稿存 storage.session；④ **摄像头扫码**（PR-4）——独立标签页 `camera/`（getUserMedia 运行时权限，manifest 零新增），`qr.js` 新增 `decodeFrame` 单趟帧接缝，rVFC + in-flight 丢帧锁 + 150ms 节流，自动打开开关默认关仅会话内有效；⑤ 收尾——版本 1.2.0、pack-zip 加 `camera`、README/PRIVACY ×2 重写（快捷键不预检边界句、CSP 说明、摄像头/wasm/生成本地口径）、旧引擎口径清理、e2e 至 **148 用例**（A–I 九组，msedge/chromium × zh-CN/en-US 四轮全绿；含「真机等价」MJPEG 实帧层——人工冒烟「摄像头真机」的软件全链路自动化等价，I11/I11b；PR #7 AIbot review 采纳 9 项后追加失败生命周期/竞态/高分辨率双层防护 5 用例，I12–I16，处置见 TEST-RESULTS §10.10） |
 | v1.7 | 中英双语适配（I18N-PLAN.md，D1–D4 + grill Q1–Q6 全部拍板）：① 接入 chrome.i18n——新增 `_locales/{en,zh_CN}`（42 key），`i18n.js` 改为 getMessage 装配（对外 `self.I18N` 接口与 key 零变化，兑现 v1.2「文案收口」承诺）；manifest `description`/快捷键描述走 `__MSG_`，`default_locale=en`（未知语言回落英文，D1）；名称保持 QR2Link 不翻译（D2）。② `<html lang>` 按 `locale_lang` 自描述 key 设定（比 getUILanguage 更准，可识别 default 回落）；右键菜单补 `onStartup` 重建（浏览器改语言重启后标题跟随）。③ 守门与发布：`pack-zip` INCLUDE 补 `_locales`（漏装=扩展损坏）；新增 `scripts/check-locales.mjs` 静态校验（key 奇偶/非空/引用闭包/manifest token），run-all 第 0 步强制执行 + 发版清单（Q3，不建 CI）。④ e2e 双语化：`--lang` 启动参数 + `msg()` 期望文案助手（与 `_locales` 同源），21 处硬编码中文断言去硬编码；新增 A3b（manifest 解析）/B1 扩展（html lang）；同一套 69 用例 `QR2LINK_E2E_LANG={zh-CN,en-US}` 双语回归（Q4：en 仅 chromium）。⑤ 文档：README/PRIVACY 英文版独立文件 + 互链（D4）；zh-TW/HK 无繁体包回落英文（Q2 拍板接受，README 已知限制 + issue 待办）。⑥ 版本 1.0.0→1.1.0（Q6）。⑦ 真实弹窗实测（computer use 全链路）发现两处发布级缺陷并修复：发布 zip 条目分隔符 `\`→`/`（Compress-Archive 缺陷，CR store 拒收 + 严格解压工具破坏 `_locales`，pack-zip 内置字节级自检）；`#drop-overlay` 常驻可见（`display:flex` 压过 `hidden` 属性，v1.0 起即存在，补 `[hidden]{display:none}` + B1 回归断言） |
 | v1.6 | PR #2 外部 review 采纳合入：① 重扫墙钟预算——自阶段 2 起算 8s，阶段 3 梯子逐 tile 检查、超时截停（像素预算只限扫描量、无法跨设备换算耗时上界，单机实测不构成证明；review P1。注：review 中「24 tile × 9MP ≈ 216MP/864MB」的算术有误，每趟网格累计处理量 ≈ rect 面积，全梯子 ≈ 4×rect（9MP 时约 36MP），但其「最坏情形须有界」的结论成立，仍采纳）；② 新增 `QR2Link.getLastDecodeStats()` 测试探针（阶段选择记录，E2E 边界用例锁定 9MP/50MP 阈值，review P2）；③ 补堆叠双码（1×2 梯级）可重复 E2E 断言与 offscreen 最坏全 miss 回归用例（review P2）；④ TEST-RESULTS 顶部口径重构为「当前迭代唯一总览」（review P2） |
 | v1.0 | 初版设计 |
@@ -381,7 +381,7 @@ function parseHttpUrl(raw) {
 - **danger**：`xn--` punycode 解码后混排拉丁/西里尔/希腊字母（同形攻击，内嵌 RFC 3492 解码器）；URL 带 userinfo（`user[:pass]@`，含仅用户名形态——覆盖 `https://example.com@evil.com/` 类仿冒）
 - **caution**：`http:` 明文；IP 字面量主机（含 IPv6 `[::1]`、IPv4-mapped、私网/回环段，统一归「内网或本机地址」）；已知短链/QR 短链域（~15 个，safety.js 顶部常量）
 
-**作用域（拍板③/⑦）**：预检仅在**弹窗结果卡片**路径生效——isUrl 卡片加绿/黄/红指示条（可展开原因列表）；**danger 级「打开」变两段式确认**（复用 history-clear 的 3s 解除模式；caution/ok 一键直开）。`background.js` 的 `openFirstLink` **不接入** safety、快捷键直扫行为零变化（直扫路径用户没看过 URL，保持零确认直达；README 使用提示明示此边界——「快捷键直扫自动打开不做安全预检」）。
+**作用域（拍板③/⑦）**：预检仅在**弹窗结果卡片**路径生效——isUrl 卡片加绿/黄/红指示条（可展开原因列表）；**danger 级「打开」变两段式确认**（复用 history-clear 的 3s 解除模式；caution/ok 一键直开）。`background.js` 的 `openFirstLink` **不接入** safety、快捷键直扫行为零变化（直扫路径用户没看过 URL，保持零确认直达；README 使用提示明示此边界——「快捷键直扫自动打开不做安全预检」）。**摄像头扫码页同理不接入**（PR #7 AIbot review 拍板延续③的分层：扫码即开路径零确认直达，摄像头「自动打开」为默认关的显式 opt-in；README/PRIVACY 同步明示）。
 
 ### 5.6 摄像头扫码（v1.2 新增，B1；`camera/camera.html + camera.js + camera.css`）
 
@@ -396,9 +396,13 @@ requestVideoFrameCallback（与视频轨同步出帧）
 ```
 
 - **并发控制**：in-flight 丢帧锁（上一帧解码未完成直接丢帧，不排队）+ 150ms 节流（附加限频）；循环代号（loopSeq）递增使停循环/重建后在途回调自弃
+- **取流竞态防护**（PR #7 AIbot review P1 采纳）：取流代号（startSeq）——重试/切设备/前台恢复重叠时，过期的 getUserMedia / enumerateDevices 结果自弃并对旧流 tracks 立即止损（防 MediaStream 泄漏：摄像头常亮/设备占用）
+- **运行中流中断**（review P1 采纳）：video track `ended`（设备拔出/系统撤销权限）→ 停循环清理 + 可重试引导（`cameraStreamLost`）；不单独监听 `devicechange`（ended 已覆盖本流，设备列表随下次 start 刷新）
+- **分辨率双层控制**（review P1/P2 采纳）：getUserMedia `ideal 1280` 约束（fake 设备实测生效：2560 文件源交付 1280）+ submitFrame 对超 `FRAME_MAX_SIDE`(1280) 帧硬性等比降采样（模拟不满足 ideal 的 4K 摄像头经 applyConstraints 实测锁定）——单帧解码成本钉死 ~1MP 当量（zxing 无码噪声实测 ~230ms/MP）
+- **BFCache**（review P2 采纳）：pagehide 记录「因导航而停」，`pageshow(persisted)` 返回时自动重新取流（横幅/引导态不自动恢复）
 - **命中**：停循环出横幅（结果原文 + 打开[仅 http/https] / 复制 / 「继续扫」）；流保持运行（预览不死），「继续扫」重建循环（流已停则重新 getUserMedia）
 - **生命周期**：`pagehide` / `visibilitychange(hidden)` → 停循环 + **停全部 track**（帧数据仅内存处理不落盘）；扫描中被隐藏的回前台自动恢复，横幅/引导态不自动恢复
-- **设备选择器**：`enumerateDevices` 报告多摄像头时显示，切换即按 `exact deviceId` 重启流；单摄像头隐藏
+- **设备选择器**：`enumerateDevices` 报告多摄像头时显示（枚举结果受 startSeq 保护，过期不覆盖新状态，review P2），切换即按 `exact deviceId` 重启流；单摄像头隐藏；无 label 兜底走 i18n（`cameraUnknownDevice`「摄像头 N」，review P2——不得硬编码英文）
 - **错误引导**：权限拒绝（NotAllowedError）→ 引导文案 + 重试；无设备（NotFoundError/OverconstrainedError）→ 引导文案（无重试）
 - **自动打开开关**：默认关、仅会话内有效、**不持久化**（PR-4 拍板）；开启时命中 http/https 自动新开页
 - **测试钩子**：`Camera.__testInjectFrame(imageData)` 与生产共用 decodeFrame 并走同一 onHit 路径；`__testStats()` 帧计数/状态探针（沿 getLastDecodeStats 先例）。**真机等价层（I11/I11b）**：`--use-file-for-fake-video-capture` 以 MJPEG 文件（内容 = 真实码图）替换 fake 采集设备的帧源——经完整媒体管线零注入命中，「物理摄像头扫实体码」的软件全链路自动化等价（Chromium Y4M 解析器有非标定界，故选 MJPEG，见 TEST-RESULTS §10.9）
@@ -466,7 +470,7 @@ requestVideoFrameCallback（与视频轨同步出帧）
 
 **自动化验收（test/e2e，DESIGN §8 的可自动化子集）**
 
-Playwright 驱动真实浏览器（Edge 品牌版 / Playwright Chromium）加载未打包扩展，**143 用例 × 九组 A–I**，同一套用例 `QR2LINK_E2E_LANG={zh-CN,en-US}` 双语回归（四轮全绿为发版门禁；实测记录见 TEST-RESULTS.md）：
+Playwright 驱动真实浏览器（Edge 品牌版 / Playwright Chromium）加载未打包扩展，**148 用例 × 九组 A–I**，同一套用例 `QR2LINK_E2E_LANG={zh-CN,en-US}` 双语回归（四轮全绿为发版门禁；实测记录见 TEST-RESULTS.md）：
 
 | 组 | 覆盖 | 用例数 |
 |---|------|-------|
@@ -478,7 +482,7 @@ Playwright 驱动真实浏览器（Edge 品牌版 / Playwright Chromium）加载
 | F | 结构化解析（正向 + 负面/边界） | 24 |
 | G | 安全预检（分级/reasons 排序/danger 两段式/快捷键不预检契约） | 7 |
 | H | 生成二维码（预填/草稿/样式矩阵/下载/复制/logo 边界/UTF-8/防冻结） | 16 |
-| I | 摄像头（真实链路层 fake media + 确定性解码层注入帧 + 错误路径 + 真机等价 MJPEG 实帧） | 12 |
+| I | 摄像头（真实链路层 fake media + 确定性解码层注入帧 + 错误路径 + 真机等价 MJPEG ×2 分辨率 + 失败生命周期/竞态） | 17 |
 
 > 品牌版 Chrome 137+ 忽略 `--load-extension` → 用 msedge / chromium 通道；摄像头用例用 `--use-fake-device-for-media-stream`（绿球视频轨）+ `--use-fake-ui-for-media-stream`（权限自动授予）。run-all 第 0 步前置门禁：check-locales + vendor-sync（SHA256）。
 

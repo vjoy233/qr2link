@@ -1,9 +1,9 @@
 # QR2Link 验收实测记录（TEST-RESULTS）
 
-> **当前结论（迭代四·PR-4 终章，2026-11-14，唯一有效口径；v1.2.0 收尾发布）**
-> 方式：**Playwright 自动化验收**（`test/e2e/`，143 用例 = 131 存量 + 12 I 组摄像头〔两层 10 + 真机等价 MJPEG 实帧 2〕）
-> 对应：DESIGN.md §8 验证矩阵（v1.8）；V1.2-PLAN PR-4（B1 摄像头 + 收尾发布，见 §10.9；PR-3 见 §10.7/10.8/10.8.1；PR-2 见 §10.5/10.6；PR-1 见 §10.1–10.4）
-> 结论速览：**四轮全绿 143/143 ×4（Edge 156 / Playwright Chromium × zh-CN / en-US）**；本 PR 新增锁定：popup 四入口 2×2 定稿（📷📁🎥⚡ 顺序）与 chrome.tabs.create 打开扫码页、**真实链路层（fake media：getUserMedia 成功 / track live / rVFC 持续出帧过引擎 / 节流计数介于 1..seen / 单摄像头选择器隐藏）**、**确定性解码层（__testInjectFrame 注入 normal.png 帧 → decodeFrame 单趟链命中原文/engine=zxing/format + 横幅 + 停循环 + 不写 decodeImage 探针）**、**真机等价层（MJPEG 实帧：fake 采集设备输出真实码图 → 生产链路零注入自动命中横幅 + 自动打开 + 继续扫再命中；人工冒烟「摄像头真机」的软件全链路等价）**、横幅动作（复制读回系统剪贴板 = 原文 / 打开经白名单新开 example.com）、「继续扫」恢复（横幅隐藏 + 帧继续递增）、**自动打开开关（默认关不自动开页 / 开启生效 / 重载不持久化）**、pagehide 停全部 track 且不自动恢复、visibilitychange 隐藏停 track / 回前台自动恢复并继续出帧、权限拒绝（引导 + 重试幂等）与无设备（引导 + 无重试）路径；收尾：manifest 1.2.0、pack-zip 加 camera（26 条目 + 反斜杠自检）、README/PRIVACY ×2 重写、DESIGN v1.8 全套、旧引擎口径清理
+> **当前结论（迭代四·PR-4 终章，2026-11-14，唯一有效口径；v1.2.0 收尾发布 + PR #7 AIbot review 处置）**
+> 方式：**Playwright 自动化验收**（`test/e2e/`，148 用例 = 131 存量 + 17 I 组摄像头〔两层 10 + 真机等价 MJPEG ×2 分辨率 3 + 失败生命周期/竞态/高分辨率/兜底 i18n 4〕）
+> 对应：DESIGN.md §8 验证矩阵（v1.8）；V1.2-PLAN PR-4（B1 摄像头 + 收尾发布，见 §10.9；PR #7 AIbot review 处置见 §10.10；PR-3 见 §10.7/10.8/10.8.1；PR-2 见 §10.5/10.6；PR-1 见 §10.1–10.4）
+> 结论速览：**四轮全绿 148/148 ×4（Edge 156 / Playwright Chromium × zh-CN / en-US）**；本 PR 新增锁定：popup 四入口 2×2 定稿（📷📁🎥⚡ 顺序）与 chrome.tabs.create 打开扫码页、**真实链路层（fake media：getUserMedia 成功 / track live / rVFC 持续出帧过引擎 / 节流计数介于 1..seen / 单摄像头选择器隐藏）**、**确定性解码层（__testInjectFrame 注入 normal.png 帧 → decodeFrame 单趟链命中原文/engine=zxing/format + 横幅 + 停循环 + 不写 decodeImage 探针）**、**真机等价层（MJPEG 实帧：fake 采集设备输出真实码图 → 生产链路零注入自动命中横幅 + 自动打开 + 继续扫再命中；高分辨率双层防护——ideal 约束钉 2560→1280 + applyConstraints 推回 2560 后硬性降采样仍命中；人工冒烟「摄像头真机」的软件全链路等价）**、**失败生命周期与竞态（startSeq 双重启动止损恰一 live 流 / track ended 中断引导 + 重试恢复 / BFCache pageshow 恢复且横幅态不自动恢复 / 无 label 设备 i18n 兜底）**、横幅动作（复制读回系统剪贴板 = 原文 / 打开经白名单新开 example.com）、「继续扫」恢复（横幅隐藏 + 帧继续递增）、**自动打开开关（默认关不自动开页 / 开启生效 / 重载不持久化）**、pagehide 停全部 track 且不自动恢复、visibilitychange 隐藏停 track / 回前台自动恢复并继续出帧、权限拒绝（引导 + 重试幂等）与无设备（引导 + 无重试）路径；收尾：manifest/package.json 1.2.0、pack-zip 加 camera（26 条目 + 反斜杠自检）、README/PRIVACY ×2 重写（含「快捷键与摄像头打开路径不做安全预检」边界句）、DESIGN v1.8 全套、旧引擎口径清理、摄像头页 aria-live 无障碍
 >
 > 历史迭代：迭代一（54/54，§1–§7）、迭代二（62/62，§8）、迭代三（68/68，§9）、迭代四 PR-1~PR-3（84→131，§10.1–10.8.1）仅作过程留痕，**用例计数以本节为准**。
 
@@ -402,7 +402,7 @@ review 采纳 +3 用例（H12/H13/H14），H3/H8/H11 原地扩充断言，全量
 - e2e：helpers.cjs `launch({fakeMedia:true})` 变体（`--use-fake-device-for-media-stream` + `--use-fake-ui-for-media-stream`）+ `openCameraTab`；I 组自持 context（其余组不感知媒体参数）；**真机等价 MJPEG 实帧**（人工冒烟自动化补强）：`launch({videoFile})` 变体 + makeAssets 生成 `test/out/qr-camera.mjpeg`（480×360 白底中央 300px QR 的单帧 JPEG ×15，`--use-file-for-fake-video-capture` 按扩展名选中 MjpegFileParser：标准 JPEG 帧流、30fps、EOF 自动循环重播）——fake 采集设备的帧内容 = 真实码图，生产链路零注入命中。**弃用 y4m 实证**：Chromium Y4M 解析器要求非标定界（`FRAME` 恰 5 字节无换行、头部尾随空格 0x20，FFmpeg trac #4231 同坑），标准 `FRAME\n` 写法导致帧逐级错位（实测 6 万+像素差异）与设备不稳，MJPEG 路线无此坑
 - 收尾发布：manifest **1.2.0**；pack-zip INCLUDE **只加 `camera`**（26 条目，反斜杠字节级自检通过，zip = `dist/qr2link-v1.2.0.zip`）；README ×2 重写（四入口功能表、「主流二维码与条码」不承诺穷举、权限表补 CSP/摄像头说明、**「快捷键直扫自动打开不做安全预检」边界句（PR-2 review 遗留）**、文件树、THIRD_PARTY 清单表）；PRIVACY ×2（摄像头帧本地内存不落盘、wasm 本地执行、生成完全本地三个新节）；DESIGN.md v1.8 全套（变更记录 + §1/§2.1/§3.1–3.3/§4.0/§4.5/§5.4–5.6/§6/§8/§9/§10/§11）；旧引擎口径清理（test/index.html 两处 jsQR/两阶段表述 → 三段链口径；run-all A2/B30–B32 已在 PR-1 更新，本 PR 复核无残留）
 
-#### 实测结论（四轮全绿 143/143 ×4：msedge/chromium × zh-CN/en-US）
+#### 实测结论（四轮全绿 148/148 ×4：msedge/chromium × zh-CN/en-US；143 基础 + PR #7 AIbot review 采纳 +5 见 §10.10）
 
 | 项 | 结论 | 证据 |
 |---|---|---|
@@ -418,9 +418,14 @@ review 采纳 +3 用例（H12/H13/H14），H3/H8/H11 原地扩充断言，全量
 | 无设备：NotFoundError → 引导文案、无重试按钮 | ✅ | I10 |
 | **真机等价（MJPEG 实帧）**：fake 采集设备输出真实码图（480×360、独立 URL）→ 生产链路零注入自动命中横幅（seen/submitted/decoded 全程 >0 证明经完整管线）+ 命中状态行 + 打开按钮 | ✅ | I11 |
 | 真机等价·自动打开与继续扫：开关开 → 继续扫 → 实帧再次命中（hits=2 停循环）并自动新开 example.com 页 | ✅ | I11b |
-| 存量 131 用例（A–H）零回归（含 check-locales 119 key 新闭包、vendor、gen-qr 字节稳定、pack-zip 26 条目自检） | ✅ 四轮 | 全量 + 前置门禁 |
+| 真机等价·高分辨率双层防护：2560×1440 文件源经 ideal 约束交付 1280（第一层）；applyConstraints 推回 2560 后 submitFrame 硬性降采样仍命中且轨道保持 2560（第二层，模拟不满足 ideal 的 4K 摄像头） | ✅ | I12 |
+| 双重启动竞态：getUserMedia 在途时切设备再 start（addInitScript 钉死 1200ms 延迟 + 双设备枚举）→ 三次取流后**恰一个 live 流**、#1 被 stopAll、#2 过期止损、srcObject = 最后一次 start 的存活流、扫描正常 | ✅ | I13 |
+| 运行中流中断：track stop + 合成 ended（设备拔出/权限撤销语义）→ 停循环 + `camera_stream_lost` 引导可重试；重试恢复扫描 | ✅ | I14 |
+| BFCache：pagehide 停流 → pageshow(persisted) 自动恢复扫描；横幅态返回不自动恢复（横幅仍在，用户显式继续） | ✅ | I15 |
+| 无 label 设备兜底：枚举返回空 label 双摄像头 → 选择器选项 = 本地化「摄像头 N」（zh/en 各随语言包断言，无英文硬编码） | ✅ | I16 |
+| 存量 131 用例（A–H）零回归（含 check-locales 121 key 新闭包、vendor、gen-qr 字节稳定、pack-zip 26 条目自检） | ✅ 四轮 | 全量 + 前置门禁 |
 
-I 组 12 用例（两层拆分——真实链路层 I1/I2/I7/I8 + 确定性解码层 I3–I6 + 错误路径 I9/I10 + 真机等价层 I11/I11b），全量 131 → **143**，四轮全绿 **143/143 ×4**。
+I 组 17 用例（两层拆分——真实链路层 I1/I2/I7/I8 + 确定性解码层 I3–I6 + 错误路径 I9/I10 + 真机等价层 I11/I11b/I12 + 失败生命周期/竞态 I13–I16），全量 131 → **148**（review 采纳 +5），四轮全绿 **148/148 ×4**。
 实测注记：① fake media 变体下 popup 打开摄像头页全链路（入口点击 → 标签页 → 自动取流 → rVFC 出帧）双通道（Edge/Chromium）一致；② I9/I10 经 `addInitScript` 钉死 getUserMedia 拒绝形态——真权限弹窗不可自动化，本组锁定的是错误映射与引导交互（产品侧全部责任面）；③ **摄像头真机的软件全链路已由 I11/I11b（MJPEG 实帧）自动化覆盖**（物理摄像头 + 实体印刷码这层物理世界不可自动化，见下方人工清单）；④ en-US 两轮首跑因机器前台被占用（oskeys.ps1 安全放弃注入 + 自动化浏览器被关闭，C/D 组环境性中断，报告留痕 `report/`），独占前台复跑后全绿——非代码回归（同代码 zh-CN 两轮一次通过）；⑤ MJPEG 实帧方案经 dumpio 探针 + Chromium `file_video_capture_device.cc` 源码逐行实证（帧定界/扩展名选择/EOF 循环行为），弃用的 y4m 探索过程与根因已锚定在 makeAssets 注释。
 
 #### 人工冒烟清单（V1.2-PLAN「验证」节；PR-4 后自动化覆盖对照）
@@ -432,3 +437,21 @@ I 组 12 用例（两层拆分——真实链路层 I1/I2/I7/I8 + 确定性解�
 | 摄像头真机（实体码） | ✅ **软件全链路**：MJPEG 实帧经 getUserMedia→rVFC→decodeFrame 生产代码零注入命中、自动打开、继续扫 | I11 / I11b | 仅剩**物理层**：真实摄像头对准实体印刷码（光学采集质量不可自动化，可选复核） |
 | 快捷键直扫行为不变 | ✅ 真实 OS 级 Alt+Shift+S 注入全链路 | C1–C4 + D1/D2（照常打开锁定于 G 组） | 无 |
 | Edge 重复一遍 | ✅ 四轮中的 msedge = 品牌版 Edge 156 | 全量四轮 ×2（zh-CN/en-US） | 无 |
+
+### 10.10 PR #7 AIbot review 处置（2026-11-14，采纳 9 项 + 拍板延续 1 项，无驳回；含两轮补充 + 第三次补充共 10 个独立问题）
+
+| Review 点 | 处置 | 证据 |
+|---|---|---|
+| P1 start() 取流竞态：重复调用（重试/切设备/前台恢复）泄漏旧 MediaStream、过期请求覆盖状态 | **采纳**：`startSeq` 取流代号（logoSeq/loopSeq 同族）——getUserMedia/play/enumerateDevices 回调携带快照，过期即自弃并对旧流 tracks 立即止损（stopTracksOf），绝不写入 state/srcObject | I13 |
+| P1 运行中设备拔出/权限撤销 → 永久卡「扫描中」 | **采纳核心**：video track `ended` 监听（当前流有效时）→ 停循环清理 + `cameraStreamLost` 可重试引导 + 重试恢复；**devicechange 不单独监听**（ended 已覆盖本流死亡，设备列表随下次 start 的 renderDevices 刷新——完整热插拔重协商超出本页职责） | I14 |
+| P1/P2 分辨率假设未兑现（4K 摄像头全帧喂 zxing 单趟秒级） | **采纳·双层**：① getUserMedia `ideal 1280×720/30` 约束（fake 设备实测生效：2560 文件源交付 1280）；② submitFrame 对超 `FRAME_MAX_SIDE=1280` 帧硬性等比降采样（约束是 ideal 不保证满足，真实 4K-only 摄像头由硬兜底接管）。单帧解码成本钉死 ~1MP 当量（zxing 无码噪声 ~230ms/MP，V1.2-PLAN 性能基准） | I12（applyConstraints 推回 2560 实测两层各自生效） |
+| P2 BFCache：pagehide 停流后 pageshow 不恢复 | **采纳**：pagehide 记录 `stoppedByNav`（当时在扫描），`pageshow(persisted)` 自动重新取流；横幅/引导态不自动恢复（与 visibilitychange 同族语义） | I15 |
+| P2 设备无 label 兜底硬编码英文 `Camera N` | **采纳**：新 i18n key `cameraUnknownDevice`（zh「摄像头」/en "Camera"）+ 序号拼接；121 key | I16 |
+| P2 renderDevices 枚举结果无过期校验 | **采纳**：并入 startSeq——枚举回调过期即弃，不覆盖新一轮取流的选择器状态 | I13（时序内含；枚举与取流同 stub 钉死） |
+| P3 状态/结果无 aria-live 播报 | **采纳**：`#camera-status`/`#camera-banner` 加 `role=status aria-live=polite`，`#camera-guide` 加 `role=alert` | 代码审查项（HTML 静态属性） |
+| P2 package.json 版本 1.1.0 与 manifest 1.2.0 不一致 | **采纳**：同步 1.2.0 | — |
+| P2 测试未覆盖失败生命周期（当前全绿不能证明异常可恢复） | **采纳**：新增 I12–I16 五用例（高分辨率双层/双重启动竞态/track 中断/BFCache/空 label i18n），全量 143 → **148** | §10.9 表 |
+| P2 摄像头「打开/自动打开」绕过 Safety 预检，文档未明示 | **拍板延续③（与用户确认默认文档明示，实现层不接入）**：扫码即开路径零确认直达（「自动打开」为默认关的显式 opt-in）与快捷键直扫同层——README/PRIVACY/DESIGN §5.5/§5.6 明示「快捷键与摄像头打开路径不做安全预检（预检仅在弹窗结果卡片生效）」；若后续希望一致化，接入 Safety 分级属产品级改动另开 PR | README 使用提示 / PRIVACY §2 / DESIGN §5.5 |
+
+review 采纳 +5 用例（I12–I16），全量 143 → **148**，四轮全绿 **148/148 ×4**（msedge/chromium × zh-CN/en-US）。
+实现注记：① I13 用 addInitScript 同时钉死枚举（恒双设备使选择器可见）与取流（统一延迟 1200ms、记录每次返回的流、约束剥离防 exact deviceId 撞假设备）——三次 start 的 resolve 顺序确定，过期止损路径被完整断言；② I12 的第二层经 `track.applyConstraints({width:2560})` 把轨推回文件原生分辨率（模拟「不满足 ideal 的 4K-only 摄像头」），fake 设备对 applyConstraints 的放大支持为本轮实测锚定；③ devicechange 完整热插拔重协商（设备消失时自动切换到替代设备）判定为超出扫码页职责，不随本 PR（记为可选后续）。

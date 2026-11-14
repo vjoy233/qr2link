@@ -14,7 +14,7 @@ Images you provide via screenshot, upload, or paste — and the QR content decod
 
 ### 2. Camera scanning: frames processed in memory only, never on disk
 
-The camera scan page obtains the video stream via the browser's `getUserMedia` (**runtime permission**: prompted by the browser on first use, revocable from the address-bar permission icon; the manifest permission list is unchanged). Video frames are drawn to an in-memory canvas and decoded in place — **no screenshots, no recording, no disk writes**, and no network requests. The camera stops immediately when the scan page is closed or moved to the background.
+The camera scan page obtains the video stream via the browser's `getUserMedia` (**runtime permission**: prompted by the browser on first use, revocable from the address-bar permission icon; the manifest permission list is unchanged). Video frames are drawn to an in-memory canvas and decoded in place — **no screenshots, no recording, no disk writes**, and no network requests. The camera stops immediately when the scan page is closed or moved to the background. The scan page's "open / auto-open after scanning" is not safety-pre-checked (risk ratings apply only to popup result cards) — "auto-open" is an explicit opt-in switch, off by default and session-only.
 
 ### 3. QR generation: fully local
 
