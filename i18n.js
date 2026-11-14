@@ -49,6 +49,8 @@
     'cameraTitle', 'cameraDevice', 'cameraStarting', 'cameraScanning', 'cameraHit',
     'cameraAutoOpen', 'cameraPermissionDenied', 'cameraNoDevice', 'cameraStartFailed',
     'cameraRetry', 'cameraResume',
+    // 摄像头运行时中断与设备兜底（PR #7 AIbot review P1/P2 采纳）
+    'cameraStreamLost', 'cameraUnknownDevice',
     // 安全预检指示条（V1.2-PLAN PR-2，C2）
     'safetyLevelOk', 'safetyLevelCaution', 'safetyLevelDanger',
     'safetyReasonIdn', 'safetyReasonUserPass', 'safetyReasonHttp', 'safetyReasonIp',

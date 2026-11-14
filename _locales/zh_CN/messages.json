@@ -474,5 +474,13 @@
   "camera_resume": {
     "message": "继续扫",
     "description": "摄像头页：命中横幅的恢复扫描按钮"
+  },
+  "camera_stream_lost": {
+    "message": "摄像头连接已中断（设备拔出或权限被撤销），请重试",
+    "description": "摄像头页：运行中流中断（track ended）的引导"
+  },
+  "camera_unknown_device": {
+    "message": "摄像头",
+    "description": "摄像头页：设备无 label 时的本地化兜底名（后接序号）"
   }
 }

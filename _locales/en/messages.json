@@ -474,5 +474,13 @@
   "camera_resume": {
     "message": "Keep scanning",
     "description": "Camera page: resume-scanning button in the hit banner"
+  },
+  "camera_stream_lost": {
+    "message": "Camera connection lost (device unplugged or permission revoked), please retry",
+    "description": "Camera page: guide when the running stream ends (track ended)"
+  },
+  "camera_unknown_device": {
+    "message": "Camera",
+    "description": "Camera page: localized fallback device name when label is empty (followed by an index)"
   }
 }
