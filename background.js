@@ -78,6 +78,12 @@ async function decodeInOffscreen(source) {
 }
 
 // ---- 打开第一个 http/https 链接（工程默认值：不连环开页，DESIGN §10） ----
+// 防合并注释（V1.2-PLAN PR-2 拍板③）：openFirstLink 及其上游 handleScan 刻意【不接入】
+// Safety.assessUrl 安全预检——快捷键直扫 / 右键识别维持 v1.1「照常打开」行为契约；
+// 安全预检（含 danger 两段式确认）仅在弹窗结果卡片路径生效（popup.js / safety.js）。
+// 请勿在此引入 Safety 拦截：e2e G6 锁定了「快捷键路径 danger URL 仍自动打开」+
+// 「SW 中不存在 Safety 全局」两条边界。README 使用提示对该边界的明示由 V1.2-PLAN
+// PR-4 收尾统一补写（当前 README 尚未包含该句，勿以注释代替实际文档状态）。
 async function openFirstLink(results) {
   for (var i = 0; i < results.length; i++) {
     if (results[i].isUrl) {

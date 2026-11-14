@@ -2,7 +2,8 @@
  * run-all.cjs — QR2Link 自动化验收主套件（DESIGN §8 矩阵的可自动化子集）
  *
  * 用法：NODE_PATH="$(npm root -g)" node run-all.cjs <msedge|chromium|chrome> [suite]
- *   suite: A(SW链路) B(popup UI) C(截图主路径) D(手势/特殊页) E(zxing引擎/全码制)，缺省全部
+ *   suite: A(SW链路) B(popup UI) C(截图主路径) D(手势/特殊页) E(zxing引擎/全码制)
+ *          F(结构化解析) G(安全预检)，缺省全部
  *   语言：QR2LINK_E2E_LANG=zh-CN（缺省）| en-US —— 同一套用例双语回归（I18N-PLAN §4.8），
  *         断言文案经 msg() 读 _locales，与启动 --lang 同源；报告文件名带语言后缀
  *
@@ -25,7 +26,7 @@ const {
 const OUT_DIR = path.join(TEST_DIR, 'out');
 const REPORT_DIR = path.join(__dirname, 'report');
 const CHANNEL = process.argv[2] || 'msedge';
-const ONLY = process.argv[3] || 'ABCDE';
+const ONLY = process.argv[3] || 'ABCDEFG';
 const LANG = uiLang(); // 本轮启动语言（--lang 与断言 msg() 均以此为源）
 const OS_PROC = CHANNEL === 'msedge' ? 'msedge' : 'chrome';
 
@@ -149,6 +150,11 @@ function makeAssets() {
       .resize(3000, 3000, { kernel: 'cubic' })
       .png({ palette: true, quality: 80 })
       .toFile(path.join(OUT_DIR, 'worst-9mp.png'));
+
+    // 恶意 vCard（V1.2-PLAN PR-2 F 组负面：textContent 渲染契约）：FN 注入 HTML/脚本
+    await QRCode.toFile(path.join(OUT_DIR, 'vcard-xss.png'),
+      ['BEGIN:VCARD', 'VERSION:3.0', 'FN:<img src=x onerror="window.__xss=1">Bobby', 'TEL:+8613800138000', 'END:VCARD'].join('\r\n'),
+      { width: 320, margin: 2 });
 
     // 最小合法 PDF（含 xref，PDFium 可读）
     const objs = [
@@ -1326,6 +1332,639 @@ async function suiteE(h) {
   await page.close().catch(() => {});
 }
 
+// ================= Suite F：结构化解析（V1.2-PLAN PR-2，C1） =================
+
+async function suiteF(h) {
+  currentGroup = 'F-PARSE';
+  console.log('\n== F-PARSE: 结构化解析（parsers.js：WIFI/otpauth/vCard/tel/sms/mailto/geo） ==');
+  const page = await newPopup(h);
+  page.on('pageerror', (e) => pageErrors.push({ url: page.url(), err: String(e) }));
+
+  // 函数级断言统一通道：输入数组传参（避免 evaluate 内二次转义），逐条 parse
+  const parseAll = (inputs) => page.evaluate((arr) => arr.map((s) => window.Parsers.parse(s)), inputs);
+
+  await t('F1 WIFI 正向：四种转义还原 / nopass / 小写前缀宽容 / 重复字段后值覆盖（V1.2-PLAN PR-2）', async () => {
+    const out = await parseAll([
+      'WIFI:T:WPA;S:My\\;Network;P:p\\;a\\:ss\\,\\\\;H:true;;',
+      'WIFI:T:nopass;S:opennet;;',
+      'wifi:T:WPA;S:lower;P:pw;;',
+      'WIFI:T:WEP;S:first;S:second;P:a;;',
+    ]);
+    assertEq(out[0] && out[0].kind, 'wifi', '转义用例 kind');
+    assertEq(out[0].ssid, 'My;Network', '转义 SSID（\\; 还原）');
+    assertEq(out[0].password, 'p;a:ss,\\', '转义密码（\\; \\: \\, \\\\ 全还原）');
+    assertEq(out[0].auth, 'WPA', 'auth');
+    assertEq(out[0].hidden, true, 'hidden');
+    assertEq(out[1].auth, 'nopass', 'nopass');
+    assertEq(out[1].password, null, 'nopass 无密码');
+    assertEq(out[2] && out[2].ssid, 'lower', '小写前缀宽容');
+    assertEq(out[3].ssid, 'second', '重复字段后值覆盖');
+    assertEq(out[3].auth, 'WEP', 'WEP');
+  });
+
+  await t('F2 WIFI 负面：缺字段/空 SSID/非法 T/非法 H/超长/字段数超限/悬空反斜杠 → null 回落纯文本契约', async () => {
+    const longSsid = 'WIFI:T:WPA;S:' + 'x'.repeat(300) + ';;';
+    let manyPairs = 'WIFI:T:WPA;S:ok';
+    for (let i = 0; i < 20; i++) manyPairs += ';X' + i + ':v';
+    manyPairs += ';;';
+    const out = await parseAll([
+      'WIFI:T:WPA;P:x;;',           // 缺 S
+      'WIFI:T:WPA;S:;;',            // 空 SSID
+      'WIFI:T:XYZ;S:s;;',           // 未知加密方式
+      'WIFI:T:WPA;S:s;H:maybe;;',   // 非法 H
+      longSsid,                     // 单字段超长
+      manyPairs,                    // 字段数 > 16
+      'WIFI:T:WPA;S:x\\',           // 悬空反斜杠
+      'WIFI:',                      // 空体
+      'WIFIX:T:WPA;S:s;;',          // 非 WIFI 前缀
+    ]);
+    for (let i = 0; i < out.length; i++) assertEq(out[i], null, `负面 #${i + 1} 应返回 null`);
+  });
+
+  await t('F3 otpauth 解析：label issuer/account、参数默认值、secret 大小写与空白归一、hotp counter', async () => {
+    const out = await parseAll([
+      'otpauth://totp/QR2Link:alice%40example.com?issuer=QR2Link&secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&digits=8&period=60&algorithm=SHA256',
+      'otpauth://totp/plainaccount?secret=gezd%20gnbv',
+      'otpauth://hotp/QR2Link:bob?counter=5&secret=gezdGNBV',
+      'otpauth://hotp/nocounter?secret=GEZDGNBV',
+    ]);
+    assertEq(out[0].kind, 'totp', 'kind');
+    assertEq(out[0].issuer, 'QR2Link', 'label 前段 issuer');
+    assertEq(out[0].account, 'alice@example.com', 'label 后段 account（%40 解码）');
+    assertEq(out[0].secret, 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', 'secret');
+    assertEq(out[0].digits, 8, 'digits 显式');
+    assertEq(out[0].period, 60, 'period 显式');
+    assertEq(out[0].algorithm, 'SHA256', 'algorithm 显式');
+    assertEq(out[1].digits, 6, 'digits 默认 6');
+    assertEq(out[1].period, 30, 'period 默认 30');
+    assertEq(out[1].algorithm, 'SHA1', 'algorithm 默认 SHA1');
+    assertEq(out[1].secret, 'GEZDGNBV', '小写+内嵌空格归一');
+    assertEq(out[2].kind, 'hotp', 'hotp kind');
+    assertEq(out[2].counter, 5, 'counter 显式');
+    assertEq(out[3].counter, 0, 'counter 默认 0');
+  });
+
+  await t('F4 TOTP RFC 6238 Appendix B 官方向量（SHA1/SHA256/SHA512 8 位 ×12）+ 6 位取模（拍板①正确性锁定）', async () => {
+    const r = await page.evaluate(async () => {
+      // 测试侧 Base32 编码（RFC 4648）：向量的 ASCII 密钥 → otpauth 同构输入
+      const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+      const b32 = (s) => {
+        let bits = 0, val = 0, out = '';
+        for (const ch of new TextEncoder().encode(s)) {
+          val = (val << 8) | ch; bits += 8;
+          while (bits >= 5) { out += A[(val >>> (bits - 5)) & 31]; bits -= 5; }
+        }
+        if (bits) out += A[(val << (5 - bits)) & 31];
+        return out;
+      };
+      const K20 = '12345678901234567890';
+      const K32 = '12345678901234567890123456789012';
+      const K64 = '1234567890123456789012345678901234567890123456789012345678901234';
+      const CASES = [
+        [59, 'SHA1', K20, '94287082'], [1111111109, 'SHA1', K20, '07081804'],
+        [1111111111, 'SHA1', K20, '14050471'], [1234567890, 'SHA1', K20, '89005924'],
+        [2000000000, 'SHA1', K20, '69279037'], [20000000000, 'SHA1', K20, '65353130'],
+        [59, 'SHA256', K32, '46119246'], [1111111109, 'SHA256', K32, '68084774'],
+        [1234567890, 'SHA256', K32, '91819424'],
+        [59, 'SHA512', K64, '90693936'], [1111111109, 'SHA512', K64, '25091201'],
+        [2000000000, 'SHA512', K64, '38618901'],
+      ];
+      const out = [];
+      for (const c of CASES) {
+        const got = await window.Parsers.generateTotp(b32(c[2]), { digits: 8, period: 30, algorithm: c[1] }, c[0] * 1000);
+        out.push([c[0], c[1], got, c[3]]);
+      }
+      out.push([59, 'SHA1-d6', await window.Parsers.generateTotp(b32(K20), { digits: 6, period: 30, algorithm: 'SHA1' }, 59 * 1000), '287082']);
+      return out;
+    });
+    for (const [tSec, alg, got, want] of r) {
+      assertEq(got, want, `RFC 6238 t=${tSec} ${alg}（期望 ${want}）`);
+    }
+  });
+
+  await t('F5 TOTP 时间边界与倒计时：跨窗换码 / 同窗同码 / totpRemaining 纯函数', async () => {
+    const r = await page.evaluate(async () => {
+      const S = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+      const g = (ms) => window.Parsers.generateTotp(S, { digits: 8, period: 30 }, ms);
+      const [a, b, c] = await Promise.all([g(29999), g(30000), g(59999)]);
+      const R = window.Parsers.totpRemaining;
+      return { a, b, c, r1: R(30, 29999), r2: R(30, 30000), r3: R(60, 60000), r4: R(30, 59399) };
+    });
+    assert(r.a !== r.b, '跨周期边界（29999→30000ms）应换码');
+    assertEq(r.b, r.c, '同窗（30000/59999ms）应同码');
+    assertEq(r.r1, 1, 'remaining(30, 29999)=1');
+    assertEq(r.r2, 30, 'remaining(30, 30000)=30');
+    assertEq(r.r3, 60, 'remaining(60, 60000)=60');
+    assertEq(r.r4, 1, 'remaining(30, 59399)=1');
+  });
+
+  await t('F6 otpauth 负面：非法 Base32/缺 secret/非法 digits/period/algorithm/type/尾位组合 → null', async () => {
+    const out = await parseAll([
+      'otpauth://totp/a?secret=ABC01XYZ',  // 0/1 不在 Base32 字母表
+      'otpauth://totp/a?secret=ABC!XYZ',   // 非法符号
+      'otpauth://totp/a?secret=',
+      'otpauth://totp/a',                  // 缺 secret
+      'otpauth://totp/a?secret=GEZDGNBV&digits=5',
+      'otpauth://totp/a?secret=GEZDGNBV&digits=9',
+      'otpauth://totp/a?secret=GEZDGNBV&digits=abc',
+      'otpauth://totp/a?secret=GEZDGNBV&period=0',
+      'otpauth://totp/a?secret=GEZDGNBV&period=3601',
+      'otpauth://totp/a?secret=GEZDGNBV&algorithm=MD5',
+      'otpauth://batp/a?secret=GEZDGNBV',  // 非法 type
+      'otpauth:///a?secret=GEZDGNBV',      // 空 type
+      'otpauth://totp/a?secret=GEZDGN',    // 6 字符 = 非法尾位组合（30 bits 余 6）
+    ]);
+    for (let i = 0; i < out.length; i++) assertEq(out[i], null, `负面 #${i + 1} 应返回 null`);
+  });
+
+  await t('F7 vCard 正向：折叠行拼接 / 多值 TEL+EMAIL / ;TYPE 参数剥离 / 值反转义 / raw 原文', async () => {
+    // 折叠语义（RFC 6350 §3.2）：CRLF + 恰好一个空白为折叠符被剥除——续行两个空格
+    // 中一个是折叠符、一个是内容空格，展开后 FN = 'Alice Zhang'
+    const v = ['BEGIN:VCARD', 'VERSION:3.0', 'FN:Alice', '  Zhang', 'TEL:+8613800138000',
+      'TEL;TYPE=CELL:+8613900139000', 'EMAIL:a@example.com', 'EMAIL:b@example.com',
+      'ORG:QR2Link\\;Inc.', 'TITLE:Engineer', 'END:VCARD'].join('\r\n');
+    const [p] = await parseAll([v]);
+    assertEq(p && p.kind, 'vcard', 'kind');
+    assertEq(p.fn, 'Alice Zhang', '折叠行（续行空格拼接）');
+    assertEq(p.tels.length, 2, '多值 TEL');
+    assertEq(p.tels[1], '+8613900139000', ';TYPE 参数剥离');
+    assertEq(p.emails.length, 2, '多值 EMAIL');
+    assertEq(p.org, 'QR2Link', 'ORG 值反转义后取主段');
+    assertEq(p.title, 'Engineer', 'TITLE');
+    assertEq(p.raw, v, 'raw 保留原文（下载 .vcf 用）');
+  });
+
+  await t('F8 vCard 负面：缺 END / 缺 BEGIN / 无可展示字段 / 超行数上限 → null', async () => {
+    const noEnd = 'BEGIN:VCARD\r\nFN:X\r\n';
+    const noBegin = 'VERSION:3.0\r\nFN:X\r\nEND:VCARD';
+    const empty = 'BEGIN:VCARD\r\nVERSION:3.0\r\nEND:VCARD';
+    let many = 'BEGIN:VCARD\r\nFN:X\r\n';
+    for (let i = 0; i < 120; i++) many += 'NOTE:x' + i + '\r\n';
+    many += 'END:VCARD';
+    const out = await parseAll([noEnd, noBegin, empty, many]);
+    assertEq(out[0], null, '缺 END');
+    assertEq(out[1], null, '缺 BEGIN');
+    assertEq(out[2], null, '无可展示字段');
+    assertEq(out[3], null, '超行数上限');
+  });
+
+  await t('F9 tel/sms/smsto/mailto/geo 解析正向：参数、%XX 解码、geo 海拔与 crs 剥离', async () => {
+    const out = await parseAll([
+      'tel:+86-138-0013-8000',
+      'sms:+8613800138000?body=hello%20world',
+      'smsto:+8613800138000,hello%3F',
+      'mailto:alice@example.com?subject=Hi&body=Welcome',
+      'mailto:bob@example.com',
+      'geo:31.230416,121.473701',
+      'geo:1.5,2.5,300;crs=wgs84',
+    ]);
+    assertEq(out[0].kind, 'tel');
+    assertEq(out[0].number, '+86-138-0013-8000');
+    assertEq(out[1].kind, 'sms');
+    assertEq(out[1].number, '+8613800138000');
+    assertEq(out[1].body, 'hello world');
+    assertEq(out[2].kind, 'sms');
+    assertEq(out[2].number, '+8613800138000', 'smsto 逗号形态号码');
+    assertEq(out[2].body, 'hello?', 'smsto 逗号形态内容（%3F 解码）');
+    assertEq(out[3].kind, 'mailto');
+    assertEq(out[3].to, 'alice@example.com');
+    assertEq(out[3].subject, 'Hi');
+    assertEq(out[3].body, 'Welcome');
+    assertEq(out[4].subject, null, 'mailto 无参数');
+    assertEq(out[5].kind, 'geo');
+    assertEq(out[5].lat, 31.230416);
+    assertEq(out[5].lon, 121.473701);
+    assertEq(out[6].lat, 1.5, 'geo 海拔段与 ;crs 参数剥离');
+  });
+
+  await t('F9b tel/sms/mailto/geo 负面：空值/非法字符/越界/超长 → null', async () => {
+    const out = await parseAll([
+      'tel:',
+      'tel:abc@def',
+      'sms:abc?body=x',
+      'mailto:',
+      'mailto:' + 'x'.repeat(300) + '@a.b',
+      'geo:99,0',
+      'geo:abc,def',
+      'geo:1.0',
+    ]);
+    for (let i = 0; i < out.length; i++) assertEq(out[i], null, `负面 #${i + 1} 应返回 null`);
+  });
+
+  await t('F10 输入长度上限与 maskSecrets：>4096 → null；otpauth 显示层打码、其余文本原样', async () => {
+    const r = await page.evaluate(() => {
+      const P = window.Parsers;
+      return {
+        long: P.parse('WIFI:T:WPA;S:' + 'x'.repeat(4100) + ';;'),
+        longOtp: P.parse('otpauth://totp/a?secret=' + 'A'.repeat(4100)),
+        mask: P.maskSecrets('otpauth://totp/a?issuer=X&secret=GEZDGNBV&digits=6'),
+        maskOnly: P.maskSecrets('otpauth://totp/a?secret=GEZDGNBV'),
+        plain: P.maskSecrets('WIFI:T:WPA;S:s;P:pass;;'),
+      };
+    });
+    assertEq(r.long, null, '超长 WIFI 拒绝');
+    assertEq(r.longOtp, null, '超长 otpauth 拒绝');
+    assert(r.mask.indexOf('GEZDGNBV') === -1, '打码后不应含明文 secret');
+    assert(r.mask.indexOf('secret=\u2022\u2022') > 0, '打码后应含 ••');
+    assert(r.mask.startsWith('otpauth://totp/a?issuer=X&'), '其余参数保留原样');
+    assertEq(r.maskOnly, 'otpauth://totp/a?secret=\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022', '仅 secret 值替换');
+    assertEq(r.plain, 'WIFI:T:WPA;S:s;P:pass;;', '非 otpauth 原样返回');
+  });
+
+  await t('F11 UI：WIFI 码上传 → 结构化卡片字段还原展示 + 复制密码写剪贴板', async () => {
+    await page.setInputFiles('#file-input', path.join(TEST_DIR, 'structured', 'wifi.png'));
+    await waitResults(page);
+    const card = page.locator('.parsed-card[data-kind="wifi"]');
+    await card.waitFor({ state: 'visible' });
+    const vals = await card.locator('.parsed-value').allTextContents();
+    assert(vals.includes('My;Network') && vals.includes('p;a:ss,\\'), `转义字段应还原展示，实际 ${JSON.stringify(vals)}`);
+    assert(vals.includes(msg('parse_yes')), 'H:true 应显示肯定值');
+    await card.locator('.mini-btn', { hasText: msg('btn_copy') }).click();
+    await sleep(300);
+    assertEq(await getClipboardText(), 'p;a:ss,\\', '复制密码（还原后的明文）');
+  });
+
+  await t('F12 UI：otpauth 码上传 → 动态码 + 倒计时 + secret 打码切换；原文显示层打码、复制取原文', async () => {
+    await goHome(page);
+    await page.setInputFiles('#file-input', path.join(TEST_DIR, 'structured', 'otpauth.png'));
+    await waitResults(page);
+    const card = page.locator('.parsed-card[data-kind="totp"]');
+    await card.waitFor({ state: 'visible' });
+    const code = await card.locator('.otp-code').textContent();
+    assert(/^\d{6}$/.test(code), `动态码应为 6 位数字，实际 ${code}`);
+    const cd = await card.locator('.otp-countdown').textContent();
+    assert(/^\d+s$/.test(cd), `倒计时应为 Ns 形态，实际 ${cd}`);
+    const secretVal = card.locator('.parsed-secret .secret-value');
+    assertEq(await secretVal.textContent(), '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022', 'secret 默认打码');
+    await card.locator('.mini-btn', { hasText: msg('parse_show_secret') }).click();
+    assertEq(await secretVal.textContent(), 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', '点击显示明文');
+    assertEq(await card.locator('.mini-btn', { hasText: msg('parse_hide_secret') }).count(), 1, '按钮翻转为隐藏');
+    const shown = await page.locator('.result-card .result-text').first().textContent();
+    assert(shown.indexOf('GEZDGNBVGY3TQOJQ') === -1, `结果原文显示层应打码，实际 ${shown}`);
+    assert(shown.indexOf('\u2022\u2022\u2022\u2022') >= 0, '打码符号应可见');
+    await page.locator('.result-actions .mini-btn', { hasText: msg('btn_copy') }).first().click();
+    await sleep(300);
+    assert((await getClipboardText()).indexOf('secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ') >= 0, '复制应保持原文');
+  });
+
+  await t('F13 UI：历史行 otpauth 显示层打码 + 显示切换 + 存储/复制保持原文（review P1）', async () => {
+    await goHome(page);
+    await page.locator('label.switch').click(); // 开启历史
+    await sleep(200);
+    await page.setInputFiles('#file-input', path.join(TEST_DIR, 'structured', 'otpauth.png'));
+    await waitResults(page);
+    await page.locator('.result-actions .mini-btn', { hasText: msg('btn_keep') }).first().click();
+    await sleep(300);
+    await goHome(page);
+    const row = page.locator('#history-list .history-item').first();
+    const shown = await row.locator('.history-text').textContent();
+    assert(shown.indexOf('GEZDGNBVGY3TQOJQ') === -1 && shown.indexOf('\u2022\u2022\u2022') >= 0, `历史行显示层应打码，实际 ${shown}`);
+    const stored = await page.evaluate(() => chrome.storage.local.get(null));
+    assertEq(stored['qr2link.history.items'].length, 1, '存储 1 条');
+    assert(stored['qr2link.history.items'][0].text.indexOf('secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ') >= 0, '存储保持原文');
+    await row.locator('.mini-btn', { hasText: msg('parse_show_secret') }).click();
+    assert((await row.locator('.history-text').textContent()).indexOf('secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ') >= 0, '点击显示后历史行明文');
+    await row.locator('.mini-btn', { hasText: msg('btn_copy') }).click();
+    await sleep(300);
+    assert((await getClipboardText()).indexOf('secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ') >= 0, '历史行复制保持原文');
+  });
+
+  await t('F14 UI：vCard 码上传 → 字段卡片 + 下载锚点（data:URI）；恶意 FN 以纯文本原样渲染（textContent 契约）', async () => {
+    await page.setInputFiles('#file-input', path.join(TEST_DIR, 'structured', 'vcard.png'));
+    await waitResults(page);
+    const card = page.locator('.parsed-card[data-kind="vcard"]');
+    await card.waitFor({ state: 'visible' });
+    const vals = await card.locator('.parsed-value').allTextContents();
+    assert(vals.includes('Alice Zhang'), 'FN 字段');
+    assert(vals.includes('+8613800138000') && vals.includes('+8613900139000'), '两个 TEL');
+    assert(vals.includes('alice@example.com'), 'EMAIL');
+    const dl = card.locator('a[download]');
+    assertEq(await dl.count(), 1, '下载锚点存在');
+    const href = await dl.first().getAttribute('href');
+    assert(href.startsWith('data:text/vcard;charset=utf-8,'), `href 应为 data:URI，实际 ${href && href.slice(0, 40)}`);
+    assertEq(await dl.first().getAttribute('download'), 'contact.vcf', 'download 文件名');
+    // 恶意字段内容：FN 注入 HTML —— textContent 渲染为字面文本，脚本不得执行
+    await goHome(page);
+    await page.setInputFiles('#file-input', path.join(OUT_DIR, 'vcard-xss.png'));
+    await waitResults(page);
+    const xcard = page.locator('.parsed-card[data-kind="vcard"]');
+    await xcard.waitFor({ state: 'visible' });
+    const fn = await xcard.locator('.parsed-value').first().textContent();
+    assertEq(fn, '<img src=x onerror="window.__xss=1">Bobby', '恶意 FN 应以纯文本原样呈现');
+    assertEq(await page.evaluate(() => window.__xss), undefined, 'onerror 不应被执行');
+  });
+
+  await t('F15 UI：geo 码上传 → 坐标卡片、仅复制不打开（「仅 http/https 可打开」契约）', async () => {
+    await goHome(page);
+    await page.setInputFiles('#file-input', path.join(TEST_DIR, 'structured', 'geo.png'));
+    await waitResults(page);
+    const card = page.locator('.parsed-card[data-kind="geo"]');
+    await card.waitFor({ state: 'visible' });
+    const vals = await card.locator('.parsed-value').allTextContents();
+    assert(vals.includes('31.230416') && vals.includes('121.473701'), `经纬度展示，实际 ${JSON.stringify(vals)}`);
+    const btns = await page.locator('.result-card .result-actions .mini-btn').allTextContents();
+    assert(!btns.includes(msg('btn_open')), 'geo 卡不应有打开按钮');
+    assert(btns.includes(msg('btn_copy')), '应有复制按钮');
+  });
+
+  await t('F16 UI：HOTP 码上传 → 仅参数展示、无动态码（拍板①：hotp 不生成）', async () => {
+    await goHome(page);
+    await page.setInputFiles('#file-input', path.join(TEST_DIR, 'structured', 'hotp.png'));
+    await waitResults(page);
+    const card = page.locator('.parsed-card[data-kind="hotp"]');
+    await card.waitFor({ state: 'visible' });
+    assertEq(await card.locator('.otp-code').count(), 0, 'HOTP 不应有动态码');
+    assertEq(await card.locator('.parsed-hint').textContent(), msg('parse_otp_hotp_hint'), 'HOTP 提示文案');
+    const vals = await card.locator('.parsed-value').allTextContents();
+    assert(vals.includes('5'), 'counter=5 展示');
+  });
+
+  await t('F17 TOTP 倒计时随视图切换清理：setInterval 全清、无泄漏（popup.js 清理契约）', async () => {
+    // 在触发解码前 patch setInterval/clearInterval 记录活跃句柄（popup.js 在渲染时才调用）
+    await page.evaluate(() => {
+      window.__ivActive = new Set();
+      const origSet = window.setInterval;
+      const origClear = window.clearInterval;
+      window.setInterval = function (fn, ms) {
+        const id = origSet.call(window, fn, ms);
+        window.__ivActive.add(id);
+        return id;
+      };
+      window.clearInterval = function (id) {
+        window.__ivActive.delete(id);
+        return origClear.call(window, id);
+      };
+    });
+    await goHome(page);
+    await page.setInputFiles('#file-input', path.join(TEST_DIR, 'structured', 'otpauth.png'));
+    await waitResults(page);
+    await page.locator('.parsed-card[data-kind="totp"]').waitFor({ state: 'visible' });
+    const during = await page.evaluate(() => window.__ivActive.size);
+    assert(during >= 1, `TOTP 卡片渲染后应有活跃倒计时 interval，实际 ${during}`);
+    await goHome(page); // 离开结果视图 → clearTotpTimers
+    await sleep(200);
+    assertEq(await page.evaluate(() => window.__ivActive.size), 0, '视图切换后 interval 应全部清理');
+  });
+
+  // ---- PR #5 AIbot review 采纳用例（F18–F23 / G7）----
+
+  await t('F18 maskSecrets 抗绕过：编码参数名 %73ecret 与重复 secret 逐项全遮蔽；非 secret 段原样保留（PR #5 review P1 + 复核 P3）', async () => {
+    const r = await page.evaluate(() => {
+      const P = window.Parsers;
+      return {
+        parseEnc: P.parse('otpauth://totp/a?%73ecret=GEZDGNBV'),
+        enc: P.maskSecrets('otpauth://totp/a?%73ecret=GEZDGNBV'),
+        dup: P.maskSecrets('otpauth://totp/a?secret=AAAAAAA1&digits=6&secret=BBBBBBB2'),
+        pad: P.maskSecrets('  otpauth://totp/a?secret=GEZDGNBV  '),
+        keep: P.maskSecrets('otpauth://totp/a?issuer=Foo+Bar&secret=GEZDGNBV&note=a+b'),
+      };
+    });
+    assertEq(r.parseEnc && r.parseEnc.kind, 'totp', 'URLSearchParams 语义下 %73ecret 即 secret');
+    assertEq(r.parseEnc.secret, 'GEZDGNBV', 'parse 应命中编码参数名（与遮蔽同源）');
+    assert(r.enc.indexOf('GEZDGNBV') === -1, '编码参数名的 secret 必须被遮蔽');
+    assert(r.enc.indexOf('%73ecret=\u2022\u2022') > 0, '遮蔽后应显示打码值（参数名保留原始编码形态）');
+    assert(r.dup.indexOf('AAAAAAA1') === -1 && r.dup.indexOf('BBBBBBB2') === -1, '重复 secret 两项都遮蔽');
+    assertEq((r.dup.match(/secret=\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022/g) || []).length, 2, '两个 secret 参数各有打码');
+    assert(r.dup.indexOf('digits=6') > 0, '其余参数保留');
+    assert(r.pad.indexOf('GEZDGNBV') === -1 && r.pad.indexOf('\u2022\u2022\u2022\u2022') >= 0, '前后空白输入宽容处理');
+    // 复核 P3：非 secret 段保持原始编码形态（+ 不被重编码为 %2B/%20）
+    assert(r.keep.indexOf('issuer=Foo+Bar') > 0 && r.keep.indexOf('note=a+b') > 0, `非 secret 段应原样保留，实际 ${r.keep}`);
+    assert(r.keep.indexOf('GEZDGNBV') === -1, 'secret 仍被遮蔽');
+  });
+
+  await t('F19 vCard 边界：伪结束标记值/尾随垃圾/无冒号行拒绝；字面量反斜杠+n 正确反转义（PR #5 review P2）', async () => {
+    const out = await parseAll([
+      'BEGIN:VCARD\r\nVERSION:3.0\r\nFN:END:VCARD\r\n',   // 值里伪造结束标记 → 无独立 END
+      'BEGIN:VCARD\r\nFN:X\r\nEND:VCARD\r\nTRAILING\r\n', // 结束记录后尾随非空内容
+      'BEGIN:VCARD\r\nTEL 123\r\nEND:VCARD',              // 无冒号的非结构行
+    ]);
+    for (let i = 0; i < out.length; i++) assertEq(out[i], null, `负面 #${i + 1} 应返回 null`);
+    // 单趟反转义：'a\\nb'（转义反斜杠 + 字母 n）→ 字面量 'a\nb'；'a\nb' → 真换行
+    const [p1, p2] = await parseAll(['BEGIN:VCARD\r\nFN:a\\\\nb\r\nEND:VCARD', 'BEGIN:VCARD\r\nFN:a\\nb\r\nEND:VCARD']);
+    assertEq(p1 && p1.fn, 'a\\nb', '字面量反斜杠+n 不得被误解为换行');
+    assertEq(p2 && p2.fn, 'a\nb', '\\n 转义仍为换行');
+  });
+
+  await t('F20 otpauth query issuer 优先 + query 参数末值覆盖（重复 secret / mailto body；PR #5 review P2）', async () => {
+    const out = await parseAll([
+      'otpauth://totp/alice?issuer=Google&secret=GEZDGNBV',
+      'otpauth://totp/LabelIss:acc?issuer=QueryIss&secret=GEZDGNBV',
+      'otpauth://totp/a?secret=ABC01XYZ&secret=GEZDGNBV',
+      'mailto:a@b.c?body=first&body=second',
+    ]);
+    assertEq(out[0].issuer, 'Google', 'query-only issuer 命中');
+    assertEq(out[0].account, 'alice', '无冒号 label 整体为 account');
+    assertEq(out[1].issuer, 'QueryIss', 'label 与 query 同在时 query 优先（锁定契约）');
+    assertEq(out[1].account, 'acc', 'account 不受 query issuer 影响');
+    assertEq(out[2].secret, 'GEZDGNBV', '重复 secret 末值覆盖（首值非法不再整体拒绝）');
+    assertEq(out[3].body, 'second', 'mailto 重复 body 末值覆盖');
+  });
+
+  await t('F21 Base32 canonical 校验：非法填充数/非零尾位/全填充拒绝，canonical 填充通过（PR #5 review P2）', async () => {
+    const out = await parseAll([
+      'otpauth://totp/a?secret=GE=',       // 填充 1（canonical 应为 6）
+      'otpauth://totp/a?secret=GE=======', // 填充 7
+      'otpauth://totp/a?secret=GF',        // 未用尾位非零
+      'otpauth://totp/a?secret=====',      // 全填充（空 body）
+      'otpauth://totp/a?secret=GE======',  // canonical：2 字符 + 6 填充
+    ]);
+    for (let i = 0; i < 4; i++) assertEq(out[i], null, `非 canonical #${i + 1} 应返回 null`);
+    assertEq(out[4] && out[4].kind, 'totp', 'canonical 填充形态应通过');
+  });
+
+  await t('F22 tel 最小语法与 geo 第三段/超长校验（PR #5 review P2）', async () => {
+    const longLat = 'geo:1.' + '0'.repeat(300) + ',2';
+    const out = await parseAll([
+      'tel:+',                 // 无数字
+      'tel:++',                // '+' 重复
+      'tel:12+34',             // '+' 中置
+      'geo:1,2,not-a-number',  // 非法海拔
+      'geo:1,2,3,4',           // 超过三段
+      longLat,                 // 坐标段超长（>256）
+      'geo:1,2,3',             // 合法海拔（不展示，仅校验）
+    ]);
+    for (let i = 0; i < 6; i++) assertEq(out[i], null, `负面 #${i + 1} 应返回 null`);
+    assertEq(out[6] && out[6].kind, 'geo', '合法第三段（海拔）应通过');
+  });
+
+  await t('F23 generateTotp/totpRemaining 参数校验与 parse 口径一致（PR #5 review P3）', async () => {
+    const r = await page.evaluate(async () => {
+      const P = window.Parsers;
+      const S = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+      const tryIt = (opts) => P.generateTotp(S, opts, 59000).then(() => 'ok', (e) => e.message);
+      return {
+        d5: await tryIt({ digits: 5 }),
+        d9: await tryIt({ digits: 9 }),
+        dFloat: await tryIt({ digits: 6.5 }),
+        p0: await tryIt({ period: 0 }),
+        pBig: await tryIt({ period: 3601 }),
+        ok: await tryIt({ digits: 6, period: 30 }),
+        rZero: P.totpRemaining(0, 30000),
+        rNeg: P.totpRemaining(-5, 30000),
+      };
+    });
+    assertEq(r.d5, 'BAD_DIGITS', 'digits=5 拒绝');
+    assertEq(r.d9, 'BAD_DIGITS', 'digits=9 拒绝');
+    assertEq(r.dFloat, 'BAD_DIGITS', '非整数 digits 拒绝');
+    assertEq(r.p0, 'BAD_PERIOD', 'period=0 拒绝');
+    assertEq(r.pBig, 'BAD_PERIOD', 'period=3601 拒绝');
+    assertEq(r.ok, 'ok', '合法参数照常生成');
+    assertEq(r.rZero, 30, 'totpRemaining 非法 period 兜底 30');
+    assertEq(r.rNeg, 30, 'totpRemaining 负 period 兜底 30');
+  });
+
+  await page.close().catch(() => {});
+  await h.sw.evaluate(() => chrome.storage.local.clear()).catch(() => {});
+}
+
+// ================= Suite G：安全预检（V1.2-PLAN PR-2，C2） =================
+
+async function suiteG(h) {
+  currentGroup = 'G-SAFETY';
+  console.log('\n== G-SAFETY: 链接安全预检（safety.js：分级/排序/两段式确认/快捷键边界） ==');
+  const page = await newPopup(h);
+  page.on('pageerror', (e) => pageErrors.push({ url: page.url(), err: String(e) }));
+
+  const assess = (urls) => page.evaluate((arr) => arr.map((u) => window.Safety.assessUrl(u)), urls);
+
+  await t('G1 分级矩阵与 reasons 排序：danger 先于 caution、规则枚举序稳定（排序契约锁定）', async () => {
+    const out = await assess([
+      'https://example.com/',
+      'http://example.com/',
+      'https://192.168.1.1/admin',
+      'https://[::1]/x',
+      'https://[::ffff:1.2.3.4]/',
+      'https://sub.bit.ly/x',
+      'https://xn--pple-43d.com/',
+      'https://user:pass@example.com/',
+      'http://user:pass@192.168.1.1/',
+      'http://bit.ly/x',
+      'ftp://example.com/',
+      'not a url',
+    ]);
+    assertEq(out[0].level, 'ok', 'https 普通域名 ok');
+    assertEq(out[0].reasons.length, 0, 'ok 无原因');
+    assertEq(out[1].level, 'caution', 'http 明文 caution');
+    assertEq(out[1].reasons.join(), 'httpPlain');
+    assertEq(out[2].reasons.join(), 'ipHost', 'IPv4 字面量');
+    assertEq(out[3].reasons.join(), 'ipHost', 'IPv6 [::1]');
+    assertEq(out[4].reasons.join(), 'ipHost', 'IPv4-mapped IPv6');
+    assertEq(out[5].reasons.join(), 'shortLink', '短链子域命中');
+    assertEq(out[6].level, 'danger', '混排域名 danger');
+    assertEq(out[6].reasons.join(), 'idnHomograph', '西里尔а+拉丁pple');
+    assertEq(out[7].level, 'danger');
+    assertEq(out[7].reasons.join(), 'userPass', '内嵌凭据');
+    assertEq(out[8].level, 'danger');
+    assertEq(out[8].reasons.join(), 'userPass,httpPlain,ipHost', '多命中：danger 先、枚举序稳定');
+    assertEq(out[9].reasons.join(), 'httpPlain,shortLink', '双 caution 枚举序');
+    assertEq(out[10].level, 'ok', '非 http(s) 不评估');
+    assertEq(out[11].level, 'ok', '畸形输入防御性 ok、不抛错');
+  });
+
+  await t('G2 punycode 边界：纯汉字/纯西里尔/拉丁变音符 IDN 不误报；畸形 xn-- 标签静默跳过（方案口径）', async () => {
+    const out = await assess([
+      'https://xn--fiqs8s.cn/',        // 「中国」纯汉字
+      'https://xn--80ak6aa92e.com/',   // 「аррӏе」纯西里尔（无拉丁混排 → 不触发；已知边界）
+      'https://xn--bcher-kva.com/',    // 「bücher」拉丁+变音符（ü 不属三系字母，单码制）
+      'https://xn--.com/',             // 空标签
+      'https://xn--' + 'z'.repeat(60) + '.com/', // 畸形超长（解码失败/溢出防护路径）
+    ]);
+    for (let i = 0; i < 3; i++) assertEq(out[i].level, 'ok', `纯单码制 IDN #${i} 不应误报`);
+    for (let i = 3; i < out.length; i++) assertEq(out[i].level, 'ok', `畸形标签 #${i} 应静默跳过`);
+  });
+
+  await t('G3 UI：分级指示条（ok 绿 / caution 黄 / danger 红）+ 原因列表 i18n 文案与顺序渲染', async () => {
+    await page.setInputFiles('#file-input', path.join(TEST_DIR, 'normal.png'));
+    await waitResults(page);
+    const okBar = page.locator('.safety-bar.ok');
+    await okBar.waitFor({ state: 'visible' });
+    assertEq(await okBar.locator('.safety-level').textContent(), msg('safety_level_ok'), 'ok 级文案');
+    assertEq(await okBar.locator('.safety-reasons').count(), 0, 'ok 无原因列表');
+
+    await goHome(page);
+    await page.setInputFiles('#file-input', path.join(TEST_DIR, 'safety', 'caution-ip.png'));
+    await waitResults(page);
+    const cBar = page.locator('.safety-bar.caution');
+    await cBar.waitFor({ state: 'visible' });
+    assertEq(await cBar.locator('.safety-level').textContent(), msg('safety_level_caution'), 'caution 级文案');
+    assert(await cBar.locator('.safety-reasons').isHidden(), '原因列表默认折叠');
+    await cBar.locator('.link-btn').click();
+    const items = await cBar.locator('.safety-reasons li').allTextContents();
+    assertEq(items.join('|'), [msg('safety_reason_http'), msg('safety_reason_ip')].join('|'), '原因渲染顺序 = reasons 序');
+
+    await goHome(page);
+    await page.setInputFiles('#file-input', path.join(TEST_DIR, 'safety', 'danger-punycode.png'));
+    await waitResults(page);
+    const dBar = page.locator('.safety-bar.danger');
+    await dBar.waitFor({ state: 'visible' });
+    assertEq(await dBar.locator('.safety-level').textContent(), msg('safety_level_danger'), 'danger 级文案');
+    await dBar.locator('.link-btn').click();
+    assertEq(await dBar.locator('.safety-reasons li').first().textContent(), msg('safety_reason_idn'), '混排原因文案');
+  });
+
+  await t('G4 danger 两段式确认：首击翻转、未确认 3s 自动还原、确认后打开（拍板⑦，复用 history-clear 模式）', async () => {
+    await goHome(page);
+    await page.setInputFiles('#file-input', path.join(TEST_DIR, 'safety', 'danger-userpass.png'));
+    await waitResults(page);
+    const openBtn = page.locator('.result-actions .mini-btn', { hasText: msg('btn_open') }).first();
+    await openBtn.click(); // 第一次：进入确认态，不打开
+    assertEq(await openBtn.textContent(), msg('safety_confirm_open'), '按钮应翻转确认文案');
+    await sleep(400);
+    const strayed = await waitTabByUrl(h, 'example.com/qr2link-danger-up', 1200);
+    assert(!strayed, '确认前不应打开链接');
+    await sleep(3000); // 3s 解除窗口
+    assertEq(await openBtn.textContent(), msg('btn_open'), '3 秒未确认应自动还原');
+    // 二次流程：翻转后 3s 内确认 → 打开
+    await openBtn.click();
+    assertEq(await openBtn.textContent(), msg('safety_confirm_open'), '再次进入确认态');
+    await openBtn.click();
+    const opened = await waitTabByUrl(h, 'example.com/qr2link-danger-up');
+    assert(opened, '确认后应打开链接');
+    await opened.close().catch(() => {});
+  });
+
+  await t('G5 caution 级一键直开（不翻转确认）', async () => {
+    await goHome(page);
+    await page.setInputFiles('#file-input', path.join(TEST_DIR, 'safety', 'caution-short.png'));
+    await waitResults(page);
+    const openBtn = page.locator('.result-actions .mini-btn', { hasText: msg('btn_open') }).first();
+    await openBtn.click();
+    assertEq(await openBtn.textContent(), msg('btn_open'), 'caution 不应翻转确认');
+    const opened = await waitTabByUrl(h, 'bit.ly');
+    assert(opened, 'caution 应一键直开');
+    await opened.close().catch(() => {});
+  });
+
+  await t('G6 拍板③边界锁定：快捷键路径 danger URL 照常自动打开；SW 不加载 Safety（防合并行为锁）', async () => {
+    // 与快捷键直扫同链路（captureVisibleTab → handleScan → openFirstLink，无安全预检分支）
+    await h.sw.evaluate((src) => handleScan({ kind: 'dataURL', value: src }),
+      fileDataUrl(path.join(TEST_DIR, 'safety', 'danger-userpass.png')));
+    const opened = await waitTabByUrl(h, 'example.com/qr2link-danger-up');
+    assert(opened, '快捷键路径 danger URL 应照常自动打开（v1.1 行为契约）');
+    await opened.close().catch(() => {});
+    // safety.js 不进 SW：openFirstLink 在依赖上无法接入预检（background.js 防合并注释）
+    assertEq(await h.sw.evaluate(() => typeof self.Safety), 'undefined', 'SW 中不应存在 Safety 全局');
+  });
+
+  await t('G7 userPass 宽口径锁定：仅用户名 userinfo（user@host）同样 danger；渲染文案覆盖仅用户名形态（PR #5 review P2 + 复核 P3）', async () => {
+    const out = await assess(['https://user@example.com/', 'https://example.com@evil.com/']);
+    for (let i = 0; i < out.length; i++) {
+      assertEq(out[i].level, 'danger', `仅用户名形态 #${i + 1} 应为 danger（@ 仿冒手法）`);
+      assertEq(out[i].reasons.join(), 'userPass', '命中 userPass');
+    }
+    // 复核 P3：UI 实际渲染的原因文案须覆盖「仅用户名」形态（不再只以 user:pass@ 为例）
+    await goHome(page);
+    await page.setInputFiles('#file-input', path.join(TEST_DIR, 'safety', 'danger-userpass.png'));
+    await waitResults(page);
+    const bar = page.locator('.safety-bar.danger');
+    await bar.waitFor({ state: 'visible' });
+    await bar.locator('.link-btn').click();
+    assertEq(await bar.locator('.safety-reasons li').first().textContent(), msg('safety_reason_user_pass'), 'userPass 原因渲染文案');
+  });
+
+  await page.close().catch(() => {});
+}
+
 // ================= 汇总 =================
 
 async function writeReport({ channel, captureProbe }) {
@@ -1384,6 +2023,8 @@ async function main() {
     if (ONLY.includes('C')) await suiteC(h, srv);
     if (ONLY.includes('D')) captureProbe.push(...(await suiteD(h, srv)) || []);
     if (ONLY.includes('E')) await suiteE(h);
+    if (ONLY.includes('F')) await suiteF(h);
+    if (ONLY.includes('G')) await suiteG(h);
   } finally {
     // 报告文件名带语言后缀，双语回归各自留档
     const summary = await writeReport({ channel: `${CHANNEL}-${LANG}`, captureProbe });

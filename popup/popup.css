@@ -294,6 +294,71 @@ section[hidden] { display: none; }
 }
 .result-actions { display: flex; flex-direction: column; gap: 6px; flex: none; }
 
+/* ---- 结构化解析卡片（V1.2-PLAN PR-2，C1）---- */
+.parsed-card {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8f9fa;
+}
+.parsed-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-weak);
+  margin-bottom: 4px;
+}
+.parsed-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  padding: 1px 0;
+}
+.parsed-label { flex: none; width: 110px; color: var(--text-weak); }
+.parsed-value { min-width: 0; word-break: break-all; }
+.parsed-secret { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.secret-value { font-family: Consolas, "Courier New", monospace; }
+.parsed-actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.parsed-hint { font-size: 11px; color: var(--text-weak); margin-top: 4px; }
+.otp-row { display: flex; align-items: baseline; gap: 8px; margin: 2px 0 4px; }
+.otp-code {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.otp-countdown { font-size: 11px; color: var(--text-weak); min-width: 30px; }
+
+/* ---- 安全指示条（V1.2-PLAN PR-2，C2）---- */
+.safety-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 12px;
+}
+.safety-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+.safety-bar.ok { background: #e6f4ea; border-color: #ceead6; }
+.safety-bar.ok .safety-dot { background: #188038; }
+.safety-bar.caution { background: #fef7e0; border-color: #feefc3; }
+.safety-bar.caution .safety-dot { background: #b06000; }
+.safety-bar.danger { background: #fce8e6; border-color: #f9ded9; }
+.safety-bar.danger .safety-dot { background: var(--danger); }
+.safety-level { font-weight: 600; }
+.safety-reasons {
+  margin: 0;
+  padding: 2px 0 0 20px;
+  width: 100%;
+  font-size: 12px;
+}
+.safety-reasons li { margin: 1px 0; }
+.mini-btn.danger-armed { border-color: var(--danger); color: var(--danger); font-weight: 600; }
+
 /* ---- 拖拽覆盖层 ---- */
 #drop-overlay {
   position: fixed;

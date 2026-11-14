@@ -123,6 +123,202 @@
     "message": "Text",
     "description": "Result meta label for non-URL payloads"
   },
+  "parse_kind_wifi": {
+    "message": "Wi-Fi network",
+    "description": "Structured card title: WIFI: QR code"
+  },
+  "parse_kind_otp": {
+    "message": "One-time password (OTP)",
+    "description": "Structured card title: otpauth:// QR code"
+  },
+  "parse_kind_vcard": {
+    "message": "Contact",
+    "description": "Structured card title: vCard QR code"
+  },
+  "parse_kind_tel": {
+    "message": "Phone",
+    "description": "Structured card title: tel: QR code"
+  },
+  "parse_kind_sms": {
+    "message": "SMS",
+    "description": "Structured card title: sms: QR code"
+  },
+  "parse_kind_mail": {
+    "message": "Email",
+    "description": "Structured card title: mailto: QR code"
+  },
+  "parse_kind_geo": {
+    "message": "Location",
+    "description": "Structured card title: geo: QR code"
+  },
+  "parse_wifi_ssid": {
+    "message": "Network name (SSID)",
+    "description": "Wi-Fi card field: SSID"
+  },
+  "parse_wifi_auth": {
+    "message": "Security",
+    "description": "Wi-Fi card field: auth type"
+  },
+  "parse_wifi_pass": {
+    "message": "Password",
+    "description": "Wi-Fi card field: password"
+  },
+  "parse_wifi_hidden": {
+    "message": "Hidden network",
+    "description": "Wi-Fi card field: hidden SSID flag"
+  },
+  "parse_wifi_auth_none": {
+    "message": "Open (no password)",
+    "description": "Wi-Fi card: security value for T=nopass"
+  },
+  "parse_yes": {
+    "message": "Yes",
+    "description": "Boolean field display: true"
+  },
+  "parse_no": {
+    "message": "No",
+    "description": "Boolean field display: false"
+  },
+  "parse_otp_code": {
+    "message": "Current code",
+    "description": "OTP card: TOTP live code label"
+  },
+  "parse_otp_issuer": {
+    "message": "Issuer",
+    "description": "OTP card field: issuer"
+  },
+  "parse_otp_account": {
+    "message": "Account",
+    "description": "OTP card field: account name"
+  },
+  "parse_otp_secret": {
+    "message": "Secret key",
+    "description": "OTP card field: Base32 secret (masked by default)"
+  },
+  "parse_otp_algorithm": {
+    "message": "Algorithm",
+    "description": "OTP card field: HMAC algorithm"
+  },
+  "parse_otp_digits": {
+    "message": "Digits",
+    "description": "OTP card field: code digit count"
+  },
+  "parse_otp_period": {
+    "message": "Period (s)",
+    "description": "OTP card field: TOTP period in seconds"
+  },
+  "parse_otp_counter": {
+    "message": "Counter",
+    "description": "OTP card field: HOTP counter"
+  },
+  "parse_otp_hotp_hint": {
+    "message": "HOTP parameters only; codes are not generated here",
+    "description": "OTP card hint: HOTP is display-only (decision #1)"
+  },
+  "parse_show_secret": {
+    "message": "Show",
+    "description": "Secret mask toggle: reveal plaintext"
+  },
+  "parse_hide_secret": {
+    "message": "Hide",
+    "description": "Secret mask toggle: re-mask"
+  },
+  "parse_vcard_name": {
+    "message": "Name",
+    "description": "vCard card field"
+  },
+  "parse_vcard_tel": {
+    "message": "Phone",
+    "description": "vCard card field (may repeat)"
+  },
+  "parse_vcard_email": {
+    "message": "Email",
+    "description": "vCard card field (may repeat)"
+  },
+  "parse_vcard_org": {
+    "message": "Organization",
+    "description": "vCard card field"
+  },
+  "parse_vcard_title": {
+    "message": "Title",
+    "description": "vCard card field"
+  },
+  "btn_download_vcf": {
+    "message": "Download .vcf",
+    "description": "vCard card action: download contact file"
+  },
+  "parse_tel_number": {
+    "message": "Number",
+    "description": "tel/sms card field: number"
+  },
+  "parse_sms_body": {
+    "message": "Message",
+    "description": "sms card field: prefilled body"
+  },
+  "parse_mail_to": {
+    "message": "To",
+    "description": "mailto card field"
+  },
+  "parse_mail_subject": {
+    "message": "Subject",
+    "description": "mailto card field"
+  },
+  "parse_mail_body": {
+    "message": "Body",
+    "description": "mailto card field"
+  },
+  "parse_geo_lat": {
+    "message": "Latitude",
+    "description": "geo card field"
+  },
+  "parse_geo_lon": {
+    "message": "Longitude",
+    "description": "geo card field"
+  },
+  "safety_level_ok": {
+    "message": "Link looks OK",
+    "description": "Safety bar: no risk rule matched"
+  },
+  "safety_level_caution": {
+    "message": "Proceed with caution",
+    "description": "Safety bar: caution-level rule matched"
+  },
+  "safety_level_danger": {
+    "message": "High-risk link",
+    "description": "Safety bar: danger-level rule matched"
+  },
+  "safety_reason_idn": {
+    "message": "Domain mixes multiple scripts (possible homograph attack)",
+    "description": "Risk reason: punycode-decoded label mixes Latin/Cyrillic/Greek"
+  },
+  "safety_reason_user_pass": {
+    "message": "URL embeds login info (username or password, spoofing risk)",
+    "description": "Risk reason: URL contains userinfo (username and/or password)"
+  },
+  "safety_reason_http": {
+    "message": "Unencrypted HTTP connection",
+    "description": "Risk reason: not https"
+  },
+  "safety_reason_ip": {
+    "message": "Direct IP address (intranet or local machine)",
+    "description": "Risk reason: IP-literal host (private/loopback included, unified)"
+  },
+  "safety_reason_short": {
+    "message": "Shortened link; real destination unknown",
+    "description": "Risk reason: known shortener domain"
+  },
+  "safety_confirm_open": {
+    "message": "Open anyway?",
+    "description": "Danger two-step confirm: armed label of the open button (decision #7)"
+  },
+  "safety_show_reasons": {
+    "message": "Details",
+    "description": "Safety bar: expand risk reason list"
+  },
+  "safety_hide_reasons": {
+    "message": "Hide",
+    "description": "Safety bar: collapse risk reason list"
+  },
   "history_title": {
     "message": "Recent scans",
     "description": "History panel title"
